@@ -26,16 +26,16 @@ import { FileOperationError, FileOperationResult } from '@theia/filesystem/lib/c
 
 export namespace NavigatorDiffCommands {
     const COMPARE_CATEGORY = 'Compare';
-    export const COMPARE_FIRST: Command = {
+    export const COMPARE_FIRST = Command.toDefaultLocalizedCommand({
         id: 'compare:first',
         category: COMPARE_CATEGORY,
         label: 'Select for Compare'
-    };
-    export const COMPARE_SECOND: Command = {
+    });
+    export const COMPARE_SECOND = Command.toDefaultLocalizedCommand({
         id: 'compare:second',
         category: COMPARE_CATEGORY,
         label: 'Compare with Selected'
-    };
+    });
 }
 
 @injectable()

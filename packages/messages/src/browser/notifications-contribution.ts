@@ -25,6 +25,7 @@ import { NotificationManager } from './notifications-manager';
 import { NotificationsRenderer } from './notifications-renderer';
 import { ColorContribution } from '@theia/core/lib/browser/color-application-contribution';
 import { ColorRegistry, Color } from '@theia/core/lib/browser/color-registry';
+import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
 export class NotificationsContribution implements FrontendApplicationContribution, CommandContribution, KeybindingContribution, ColorContribution {
@@ -58,21 +59,27 @@ export class NotificationsContribution implements FrontendApplicationContributio
         });
     }
     protected getStatusBarItemText(count: number): string {
-        return `$(bell) ${count ? ` ${count}` : ''}`;
+        return `$(${count ? 'codicon-bell-dot' : 'codicon-bell'}) ${count ? ` ${count}` : ''}`;
     }
     protected getStatusBarItemTooltip(count: number): string {
         if (this.manager.centerVisible) {
-            return 'Hide Notifications';
+            return nls.localizeByDefault('Hide Notifications');
         }
         return count === 0
-            ? 'No Notifications'
-            : count === 1 ? '1 Notification' : `${count} Notifications`;
+            ? nls.localizeByDefault('No Notifications')
+            : count === 1
+                ? nls.localizeByDefault('1 New Notification')
+                : nls.localizeByDefault('{0} New Notifications', count.toString());
     }
 
     registerCommands(commands: CommandRegistry): void {
         commands.registerCommand(NotificationsCommands.TOGGLE, {
             isEnabled: () => true,
             execute: () => this.manager.toggleCenter()
+        });
+        commands.registerCommand(NotificationsCommands.SHOW, {
+            isEnabled: () => true,
+            execute: () => this.manager.showCenter()
         });
         commands.registerCommand(NotificationsCommands.HIDE, {
             execute: () => this.manager.hide()

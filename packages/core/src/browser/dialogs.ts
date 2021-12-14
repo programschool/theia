@@ -15,9 +15,9 @@
  ********************************************************************************/
 
 import { injectable, inject } from 'inversify';
-import { Disposable, MaybePromise, CancellationTokenSource } from '../common';
+import { Disposable, MaybePromise, CancellationTokenSource, nls } from '../common';
 import { Key } from './keyboard/keys';
-import { Widget, BaseWidget, Message, addKeyListener } from './widgets';
+import { Widget, BaseWidget, Message, addKeyListener, codiconArray } from './widgets';
 import { FrontendApplicationContribution } from './frontend-application';
 
 @injectable()
@@ -64,6 +64,13 @@ export namespace DialogError {
         }
         return error.message;
     }
+}
+
+export namespace Dialog {
+    export const YES = nls.localizeByDefault('Yes');
+    export const NO = nls.localizeByDefault('No');
+    export const OK = nls.localizeByDefault('OK');
+    export const CANCEL = nls.localizeByDefault('Cancel');
 }
 
 @injectable()
@@ -168,8 +175,7 @@ export abstract class AbstractDialog<T> extends BaseWidget {
         titleContentNode.appendChild(this.titleNode);
 
         this.closeCrossNode = document.createElement('i');
-        this.closeCrossNode.classList.add('fa');
-        this.closeCrossNode.classList.add('fa-times');
+        this.closeCrossNode.classList.add(...codiconArray('close'));
         this.closeCrossNode.classList.add('closeButton');
         titleContentNode.appendChild(this.closeCrossNode);
 
@@ -192,14 +198,14 @@ export abstract class AbstractDialog<T> extends BaseWidget {
         this.update();
     }
 
-    protected appendCloseButton(text: string = 'Cancel'): HTMLButtonElement {
+    protected appendCloseButton(text: string = Dialog.CANCEL): HTMLButtonElement {
         this.closeButton = this.createButton(text);
         this.controlPanel.appendChild(this.closeButton);
         this.closeButton.classList.add('secondary');
         return this.closeButton;
     }
 
-    protected appendAcceptButton(text: string = 'OK'): HTMLButtonElement {
+    protected appendAcceptButton(text: string = Dialog.OK): HTMLButtonElement {
         this.acceptButton = this.createButton(text);
         this.controlPanel.appendChild(this.acceptButton);
         this.acceptButton.classList.add('main');
@@ -379,7 +385,16 @@ export class ConfirmDialog extends AbstractDialog<boolean> {
         }
         return msg;
     }
+}
 
+export async function confirmExit(): Promise<boolean> {
+    const safeToExit = await new ConfirmDialog({
+        title: nls.localize('theia/core/quitTitle', 'Are you sure you want to quit?'),
+        msg: nls.localize('theia/core/quitMessage', 'Any unsaved changes will not be saved.'),
+        ok: Dialog.YES,
+        cancel: Dialog.NO,
+    }).open();
+    return safeToExit === true;
 }
 
 @injectable()
@@ -406,6 +421,7 @@ export class SingleTextInputDialog extends AbstractDialog<string> {
         this.inputField = document.createElement('input');
         this.inputField.type = 'text';
         this.inputField.className = 'theia-input';
+        this.inputField.spellcheck = false;
         this.inputField.setAttribute('style', 'flex: 0;');
         this.inputField.value = props.initialValue || '';
         if (props.initialSelectionRange) {

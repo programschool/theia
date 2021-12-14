@@ -20,13 +20,13 @@
 *--------------------------------------------------------------------------------------------*/
 
 import debounce = require('p-debounce');
-import { visit } from 'jsonc-parser';
+import { visit, parse } from 'jsonc-parser';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import URI from '@theia/core/lib/common/uri';
 import { Emitter, Event, WaitUntilEvent } from '@theia/core/lib/common/event';
 import { EditorManager, EditorWidget } from '@theia/editor/lib/browser';
 import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
-import { PreferenceService, StorageService } from '@theia/core/lib/browser';
+import { PreferenceScope, PreferenceService, QuickPickValue, StorageService } from '@theia/core/lib/browser';
 import { QuickPickService } from '@theia/core/lib/common/quick-pick-service';
 import { WorkspaceService } from '@theia/workspace/lib/browser/workspace-service';
 import { DebugConfigurationModel } from './debug-configuration-model';
@@ -36,7 +36,7 @@ import { ContextKey, ContextKeyService } from '@theia/core/lib/browser/context-k
 import { DebugConfiguration } from '../common/debug-common';
 import { WorkspaceVariableContribution } from '@theia/workspace/lib/browser/workspace-variable-contribution';
 import { PreferenceConfigurations } from '@theia/core/lib/browser/preferences/preference-configurations';
-import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { MonacoTextModelService } from '@theia/monaco/lib/browser/monaco-text-model-service';
 
 export interface WillProvideDebugConfiguration extends WaitUntilEvent {
 }
@@ -51,13 +51,13 @@ export class DebugConfigurationManager {
     @inject(DebugService)
     protected readonly debug: DebugService;
     @inject(QuickPickService)
-    protected readonly quickPick: QuickPickService;
+    protected readonly quickPickService: QuickPickService;
 
     @inject(ContextKeyService)
     protected readonly contextKeyService: ContextKeyService;
 
-    @inject(FileService)
-    protected readonly fileService: FileService;
+    @inject(MonacoTextModelService)
+    protected readonly textModelService: MonacoTextModelService;
 
     @inject(PreferenceService)
     protected readonly preferences: PreferenceService;
@@ -74,17 +74,25 @@ export class DebugConfigurationManager {
     protected readonly onWillProvideDebugConfigurationEmitter = new Emitter<WillProvideDebugConfiguration>();
     readonly onWillProvideDebugConfiguration: Event<WillProvideDebugConfiguration> = this.onWillProvideDebugConfigurationEmitter.event;
 
+    protected readonly onWillProvideDynamicDebugConfigurationEmitter = new Emitter<WillProvideDebugConfiguration>();
+    get onWillProvideDynamicDebugConfiguration(): Event<WillProvideDebugConfiguration> {
+        return this.onWillProvideDynamicDebugConfigurationEmitter.event;
+    }
+
     protected debugConfigurationTypeKey: ContextKey<string>;
 
     protected initialized: Promise<void>;
+
     @postConstruct()
     protected async init(): Promise<void> {
         this.debugConfigurationTypeKey = this.contextKeyService.createKey<string>('debugConfigurationType', undefined);
-        this.initialized = this.updateModels();
-        this.preferences.onPreferenceChanged(e => {
-            if (e.preferenceName === 'launch') {
-                this.updateModels();
-            }
+        this.initialized = this.preferences.ready.then(() => {
+            this.preferences.onPreferenceChanged(e => {
+                if (e.preferenceName === 'launch') {
+                    this.updateModels();
+                }
+            });
+            return this.updateModels();
         });
     }
 
@@ -149,8 +157,8 @@ export class DebugConfigurationManager {
         this.updateCurrent(option);
     }
     protected updateCurrent(options: DebugSessionOptions | undefined = this._currentOptions): void {
-        this._currentOptions = options
-            && this.find(options.configuration.name, options.workspaceFolderUri);
+        this._currentOptions = options && !options.configuration.dynamic ? this.find(options.configuration.name, options.workspaceFolderUri) : options;
+
         if (!this._currentOptions) {
             const { model } = this;
             if (model) {
@@ -188,6 +196,7 @@ export class DebugConfigurationManager {
             await this.doOpen(model);
         }
     }
+
     async addConfiguration(): Promise<void> {
         const { model } = this;
         if (!model) {
@@ -253,28 +262,46 @@ export class DebugConfigurationManager {
     }
 
     protected async doOpen(model: DebugConfigurationModel): Promise<EditorWidget> {
-        let uri = model.uri;
-        if (!uri) {
-            uri = await this.doCreate(model);
-        }
+        const uri = await this.doCreate(model);
+
         return this.editorManager.open(uri, {
             mode: 'activate'
         });
     }
+
     protected async doCreate(model: DebugConfigurationModel): Promise<URI> {
-        await this.preferences.set('launch', {}); // create dummy launch.json in the correct place
-        const { configUri } = this.preferences.resolve('launch'); // get uri to write content to it
-        let uri: URI;
-        if (configUri && configUri.path.base === 'launch.json') {
-            uri = configUri;
-        } else { // fallback
-            uri = new URI(model.workspaceFolderUri).resolve(`${this.preferenceConfigurations.getPaths()[0]}/launch.json`);
+        const uri = model.uri ?? this.preferences.getConfigUri(PreferenceScope.Folder, model.workspaceFolderUri, 'launch');
+        if (!uri) { // Since we are requesting information about a known workspace folder, this should never happen.
+            throw new Error('PreferenceService.getConfigUri has returned undefined when a URI was expected.');
+        }
+        const settingsUri = this.preferences.getConfigUri(PreferenceScope.Folder, model.workspaceFolderUri);
+        // Users may have placed their debug configurations in a `settings.json`, in which case we shouldn't modify the file.
+        if (settingsUri && !uri.isEqual(settingsUri)) {
+            await this.ensureContent(uri, model);
+        }
+        return uri;
+    }
+
+    /**
+     * Checks whether a `launch.json` file contains the minimum necessary content.
+     * If content not found, provides content and populates the file using Monaco.
+     */
+    protected async ensureContent(uri: URI, model: DebugConfigurationModel): Promise<void> {
+        const textModel = await this.textModelService.createModelReference(uri);
+        const currentContent = textModel.object.valid ? textModel.object.getText() : '';
+        try { // Look for the minimal well-formed launch.json content: {configurations: []}
+            const parsedContent = parse(currentContent);
+            if (Array.isArray(parsedContent.configurations)) {
+                return;
+            }
+        } catch {
+            // Just keep going
         }
         const debugType = await this.selectDebugType();
         const configurations = debugType ? await this.provideDebugConfigurations(debugType, model.workspaceFolderUri) : [];
         const content = this.getInitialConfigurationContent(configurations);
-        await this.fileService.write(uri, content);
-        return uri;
+        textModel.object.textEditorModel.setValue(content); // Will clobber anything the user has entered!
+        await textModel.object.save();
     }
 
     protected async provideDebugConfigurations(debugType: string, workspaceFolderUri: string | undefined): Promise<DebugConfiguration[]> {
@@ -283,6 +310,15 @@ export class DebugConfigurationManager {
     }
     protected async fireWillProvideDebugConfiguration(): Promise<void> {
         await WaitUntilEvent.fire(this.onWillProvideDebugConfigurationEmitter, {});
+    }
+
+    async provideDynamicDebugConfigurations(): Promise<{ type: string, configurations: DebugConfiguration[] }[]> {
+        await this.fireWillProvideDynamicDebugConfiguration();
+        return this.debug.provideDynamicDebugConfigurations!();
+    }
+
+    protected async fireWillProvideDynamicDebugConfiguration(): Promise<void> {
+        await WaitUntilEvent.fire(this.onWillProvideDynamicDebugConfigurationEmitter, {});
     }
 
     protected getInitialConfigurationContent(initialConfigurations: DebugConfiguration[]): string {
@@ -302,10 +338,12 @@ export class DebugConfigurationManager {
         }
         const { languageId } = widget.editor.document;
         const debuggers = await this.debug.getDebuggersForLanguage(languageId);
-        return this.quickPick.show(debuggers.map(
-            ({ label, type }) => ({ label, value: type }),
-            { placeholder: 'Select Environment' })
-        );
+        if (debuggers.length === 0) {
+            return undefined;
+        }
+        const items: Array<QuickPickValue<string>> = debuggers.map(({ label, type }) => ({ label, value: type }));
+        const selectedItem = await this.quickPickService.show(items, { placeholder: 'Select Environment' });
+        return selectedItem?.value;
     }
 
     @inject(StorageService)

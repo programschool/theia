@@ -50,6 +50,9 @@ export class MessageRegistryExt {
             } else {
                 if ('modal' in optionsOrFirstItem) {
                     options.modal = optionsOrFirstItem.modal;
+                    if ('detail' in optionsOrFirstItem) {
+                        options.detail = optionsOrFirstItem.detail;
+                    }
                 }
             }
         }
@@ -59,5 +62,4 @@ export class MessageRegistryExt {
         const actionHandle = await this.proxy.$showMessage(type, message, options, actions);
         return actionHandle !== undefined ? items[actionHandle] : undefined;
     }
-
 }

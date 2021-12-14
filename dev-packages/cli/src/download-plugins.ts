@@ -16,21 +16,26 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import fetch, { Response, RequestInit } from 'node-fetch';
-import { HttpsProxyAgent } from 'https-proxy-agent';
-import { getProxyForUrl } from 'proxy-from-env';
-import { promises as fs, createWriteStream } from 'fs';
-import * as mkdirp from 'mkdirp';
-import * as path from 'path';
-import * as process from 'process';
-import * as stream from 'stream';
+declare global {
+    interface Array<T> {
+        // Supported since Node >=11.0
+        flat(depth?: number): any
+    }
+}
+
+import { OVSXClient } from '@theia/ovsx-client/lib/ovsx-client';
+import { green, red, yellow } from 'colors/safe';
 import * as decompress from 'decompress';
+import { createWriteStream, promises as fs } from 'fs';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+import fetch, { RequestInit, Response } from 'node-fetch';
+import * as path from 'path';
+import { getProxyForUrl } from 'proxy-from-env';
+import * as stream from 'stream';
 import * as temp from 'temp';
-
-import { green, red } from 'colors/safe';
-
 import { promisify } from 'util';
-const mkdirpAsPromised = promisify<string, mkdirp.Made>(mkdirp);
+import { DEFAULT_SUPPORTED_API_VERSION } from '@theia/application-package/lib/api';
+
 const pipelineAsPromised = promisify(stream.pipeline);
 
 temp.track();
@@ -50,40 +55,96 @@ export interface DownloadPluginsOptions {
      * Defaults to `false`.
      */
     ignoreErrors?: boolean;
+
+    /**
+     * The supported vscode API version.
+     * Used to determine extension compatibility.
+     */
+    apiVersion?: string;
+
+    /**
+     * The open-vsx registry API url.
+     */
+    apiUrl?: string;
 }
 
 export default async function downloadPlugins(options: DownloadPluginsOptions = {}): Promise<void> {
+    const {
+        packed = false,
+        ignoreErrors = false,
+        apiVersion = DEFAULT_SUPPORTED_API_VERSION,
+        apiUrl = 'https://open-vsx.org/api'
+    } = options;
 
     // Collect the list of failures to be appended at the end of the script.
     const failures: string[] = [];
 
-    const {
-        packed = false,
-        ignoreErrors = false,
-    } = options;
-
-    console.warn('--- downloading plugins ---');
-
     // Resolve the `package.json` at the current working directory.
-    const pck = require(path.resolve(process.cwd(), 'package.json'));
+    const pck = JSON.parse(await fs.readFile(path.resolve('package.json'), 'utf8'));
 
     // Resolve the directory for which to download the plugins.
     const pluginsDir = pck.theiaPluginsDir || 'plugins';
 
-    await mkdirpAsPromised(pluginsDir);
+    // Excluded extension ids.
+    const excludedIds = new Set<string>(pck.theiaPluginsExcludeIds || []);
+
+    await fs.mkdir(pluginsDir, { recursive: true });
 
     if (!pck.theiaPlugins) {
         console.log(red('error: missing mandatory \'theiaPlugins\' property.'));
         return;
     }
     try {
-        await Promise.all(Object.keys(pck.theiaPlugins).map(
-            plugin => downloadPluginAsync(failures, plugin, pck.theiaPlugins[plugin], pluginsDir, packed)
-        ));
+        console.warn('--- downloading plugins ---');
+        // Download the raw plugins defined by the `theiaPlugins` property.
+        // This will include both "normal" plugins as well as "extension packs".
+        const downloads = [];
+        for (const [plugin, pluginUrl] of Object.entries(pck.theiaPlugins)) {
+            if (typeof pluginUrl !== 'string') {
+                continue;
+            }
+            downloads.push(downloadPluginAsync(failures, plugin, pluginUrl, pluginsDir, packed));
+        }
+        await Promise.all(downloads);
+
+        console.warn('--- collecting extension-packs ---');
+        const extensionPacks = await collectExtensionPacks(pluginsDir, excludedIds);
+        if (extensionPacks.size > 0) {
+            console.warn(`--- resolving ${extensionPacks.size} extension-packs ---`);
+            const client = new OVSXClient({ apiVersion, apiUrl });
+            // De-duplicate extension ids to only download each once:
+            const ids = new Set<string>(Array.from(extensionPacks.values()).flat());
+            await Promise.all(Array.from(ids, async id => {
+                const extension = await client.getLatestCompatibleExtensionVersion(id);
+                const downloadUrl = extension?.files.download;
+                if (downloadUrl) {
+                    await downloadPluginAsync(failures, id, downloadUrl, pluginsDir, packed, extension?.version);
+                }
+            }));
+        }
+
+        console.warn('--- collecting extension dependencies ---');
+        const pluginDependencies = await collectPluginDependencies(pluginsDir, excludedIds);
+        if (pluginDependencies.length > 0) {
+            console.warn(`--- resolving ${pluginDependencies.length} extension dependencies ---`);
+            const client = new OVSXClient({ apiVersion, apiUrl });
+            // De-duplicate extension ids to only download each once:
+            const ids = new Set<string>(pluginDependencies);
+            await Promise.all(Array.from(ids, async id => {
+                const extension = await client.getLatestCompatibleExtensionVersion(id);
+                const downloadUrl = extension?.files.download;
+                if (downloadUrl) {
+                    await downloadPluginAsync(failures, id, downloadUrl, pluginsDir, packed, extension?.version);
+                }
+            }));
+        }
+
     } finally {
         temp.cleanupSync();
     }
-    failures.forEach(e => { console.error(e); });
+    for (const failure of failures) {
+        console.error(failure);
+    }
     if (!ignoreErrors && failures.length > 0) {
         throw new Error('Errors downloading some plugins. To make these errors non fatal, re-run with --ignore-errors');
     }
@@ -91,14 +152,14 @@ export default async function downloadPlugins(options: DownloadPluginsOptions = 
 
 /**
  * Downloads a plugin, will make multiple attempts before actually failing.
- *
- * @param failures reference to an array storing all failures
- * @param plugin plugin short name
- * @param pluginUrl url to download the plugin at
- * @param pluginsDir where to download the plugin in
- * @param packed whether to decompress or not
+ * @param failures reference to an array storing all failures.
+ * @param plugin plugin short name.
+ * @param pluginUrl url to download the plugin at.
+ * @param target where to download the plugin in.
+ * @param packed whether to decompress or not.
+ * @param cachedExtensionPacks the list of cached extension packs already downloaded.
  */
-async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl: string, pluginsDir: string, packed: boolean): Promise<void> {
+async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl: string, pluginsDir: string, packed: boolean, version?: string): Promise<void> {
     if (!plugin) {
         return;
     }
@@ -107,11 +168,14 @@ async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl
         fileExt = '.tar.gz';
     } else if (pluginUrl.endsWith('vsix')) {
         fileExt = '.vsix';
+    } else if (pluginUrl.endsWith('theia')) {
+        fileExt = '.theia'; // theia plugins.
     } else {
         failures.push(red(`error: '${plugin}' has an unsupported file type: '${pluginUrl}'`));
         return;
     }
-    const targetPath = path.join(process.cwd(), pluginsDir, `${plugin}${packed === true ? fileExt : ''}`);
+    const targetPath = path.resolve(pluginsDir, `${plugin}${packed === true ? fileExt : ''}`);
+
     // Skip plugins which have previously been downloaded.
     if (await isDownloaded(targetPath)) {
         console.warn('- ' + plugin + ': already downloaded - skipping');
@@ -154,18 +218,18 @@ async function downloadPluginAsync(failures: string[], plugin: string, pluginUrl
         return;
     }
 
-    if (fileExt === '.vsix' && packed === true) {
+    if ((fileExt === '.vsix' || fileExt === '.theia') && packed === true) {
         // Download .vsix without decompressing.
         const file = createWriteStream(targetPath);
         await pipelineAsPromised(response.body, file);
     } else {
-        await mkdirpAsPromised(targetPath);
+        await fs.mkdir(targetPath, { recursive: true });
         const tempFile = temp.createWriteStream('theia-plugin-download');
         await pipelineAsPromised(response.body, tempFile);
         await decompress(tempFile.path, targetPath);
     }
 
-    console.warn(green(`+ ${plugin}: downloaded successfully ${attempts > 1 ? `(after ${attempts} attempts)` : ''}`));
+    console.warn(green(`+ ${plugin}${version ? `@${version}` : ''}: downloaded successfully ${attempts > 1 ? `(after ${attempts} attempts)` : ''}`));
 }
 
 /**
@@ -188,4 +252,76 @@ export function xfetch(url: string, options?: RequestInit): Promise<Response> {
         proxiedOptions.agent = new HttpsProxyAgent(proxy);
     }
     return fetch(url, proxiedOptions);
+}
+
+/**
+ * Walk the plugin directory and collect available extension paths.
+ * @param pluginDir the plugin directory.
+ * @returns the list of all available extension paths.
+ */
+async function collectPackageJsonPaths(pluginDir: string): Promise<string[]> {
+    const packageJsonPathList: string[] = [];
+    const files = await fs.readdir(pluginDir);
+    // Recursively fetch the list of extension `package.json` files.
+    for (const file of files) {
+        const filePath = path.join(pluginDir, file);
+        if ((await fs.stat(filePath)).isDirectory()) {
+            packageJsonPathList.push(...await collectPackageJsonPaths(filePath));
+        } else if (path.basename(filePath) === 'package.json' && !path.dirname(filePath).includes('node_modules')) {
+            packageJsonPathList.push(filePath);
+        }
+    }
+    return packageJsonPathList;
+}
+
+/**
+ * Get the mapping of extension-pack paths and their included plugin ids.
+ * - If an extension-pack references an explicitly excluded `id` the `id` will be omitted.
+ * @param pluginDir the plugin directory.
+ * @param excludedIds the list of plugin ids to exclude.
+ * @returns the mapping of extension-pack paths and their included plugin ids.
+ */
+async function collectExtensionPacks(pluginDir: string, excludedIds: Set<string>): Promise<Map<string, string[]>> {
+    const extensionPackPaths = new Map<string, string[]>();
+    const packageJsonPaths = await collectPackageJsonPaths(pluginDir);
+    await Promise.all(packageJsonPaths.map(async packageJsonPath => {
+        const json = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
+        const extensionPack: unknown = json.extensionPack;
+        if (Array.isArray(extensionPack)) {
+            extensionPackPaths.set(packageJsonPath, extensionPack.filter(id => {
+                if (excludedIds.has(id)) {
+                    console.log(yellow(`'${id}' referenced by '${json.name}' (ext pack) is excluded because of 'theiaPluginsExcludeIds'`));
+                    return false; // remove
+                }
+                return true; // keep
+            }));
+        }
+    }));
+    return extensionPackPaths;
+}
+
+/**
+ * Get the mapping of  paths and their included plugin ids.
+ * - If an extension-pack references an explicitly excluded `id` the `id` will be omitted.
+ * @param pluginDir the plugin directory.
+ * @param excludedIds the list of plugin ids to exclude.
+ * @returns the mapping of extension-pack paths and their included plugin ids.
+ */
+async function collectPluginDependencies(pluginDir: string, excludedIds: Set<string>): Promise<string[]> {
+    const dependencyIds: string[] = [];
+    const packageJsonPaths = await collectPackageJsonPaths(pluginDir);
+    await Promise.all(packageJsonPaths.map(async packageJsonPath => {
+        const json = JSON.parse(await fs.readFile(packageJsonPath, 'utf8'));
+        const extensionDependencies: unknown = json.extensionDependencies;
+        if (Array.isArray(extensionDependencies)) {
+            for (const dependency of extensionDependencies) {
+                if (excludedIds.has(dependency)) {
+                    console.log(yellow(`'${dependency}' referenced by '${json.name}' is excluded because of 'theiaPluginsExcludeIds'`));
+                } else {
+                    dependencyIds.push(dependency);
+                }
+            }
+        }
+    }));
+    return dependencyIds;
 }

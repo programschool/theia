@@ -17,16 +17,20 @@
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import debounce from 'p-debounce';
 import * as showdown from 'showdown';
-import * as sanitize from 'sanitize-html';
+import * as DOMPurify from '@theia/core/shared/dompurify';
 import { Emitter } from '@theia/core/lib/common/event';
 import { CancellationToken, CancellationTokenSource } from '@theia/core/lib/common/cancellation';
-import { VSXRegistryAPI, VSXResponseError } from '../common/vsx-registry-api';
-import { VSXSearchParam } from '../common/vsx-registry-types';
 import { HostedPluginSupport } from '@theia/plugin-ext/lib/hosted/browser/hosted-plugin';
 import { VSXExtension, VSXExtensionFactory } from './vsx-extension';
 import { ProgressService } from '@theia/core/lib/common/progress-service';
 import { VSXExtensionsSearchModel } from './vsx-extensions-search-model';
 import { Deferred } from '@theia/core/lib/common/promise-util';
+import { PreferenceInspectionScope, PreferenceService } from '@theia/core/lib/browser';
+import { WorkspaceService } from '@theia/workspace/lib/browser';
+import { RecommendedExtensions } from './recommended-extensions/recommended-extensions-preference-contribution';
+import URI from '@theia/core/lib/common/uri';
+import { VSXResponseError, VSXSearchParam } from '@theia/ovsx-client/lib/ovsx-types';
+import { OVSXClientProvider } from '../common/ovsx-client-provider';
 
 @injectable()
 export class VSXExtensionsModel {
@@ -34,8 +38,8 @@ export class VSXExtensionsModel {
     protected readonly onDidChangeEmitter = new Emitter<void>();
     readonly onDidChange = this.onDidChangeEmitter.event;
 
-    @inject(VSXRegistryAPI)
-    protected readonly api: VSXRegistryAPI;
+    @inject(OVSXClientProvider)
+    protected clientProvider: OVSXClientProvider;
 
     @inject(HostedPluginSupport)
     protected readonly pluginSupport: HostedPluginSupport;
@@ -46,6 +50,12 @@ export class VSXExtensionsModel {
     @inject(ProgressService)
     protected readonly progressService: ProgressService;
 
+    @inject(PreferenceService)
+    protected readonly preferences: PreferenceService;
+
+    @inject(WorkspaceService)
+    protected readonly workspaceService: WorkspaceService;
+
     @inject(VSXExtensionsSearchModel)
     readonly search: VSXExtensionsSearchModel;
 
@@ -55,7 +65,8 @@ export class VSXExtensionsModel {
     protected async init(): Promise<void> {
         await Promise.all([
             this.initInstalled(),
-            this.initSearchResult()
+            this.initSearchResult(),
+            this.initRecommended(),
         ]);
         this.initialized.resolve();
     }
@@ -79,6 +90,20 @@ export class VSXExtensionsModel {
         }
     }
 
+    protected async initRecommended(): Promise<void> {
+        this.preferences.onPreferenceChanged(change => {
+            if (change.preferenceName === 'extensions') {
+                this.updateRecommended();
+            }
+        });
+        await this.preferences.ready;
+        try {
+            await this.updateRecommended();
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
     /**
      * single source of all extensions
      */
@@ -89,9 +114,18 @@ export class VSXExtensionsModel {
         return this._installed.values();
     }
 
+    isInstalled(id: string): boolean {
+        return this._installed.has(id);
+    }
+
     protected _searchResult = new Set<string>();
     get searchResult(): IterableIterator<string> {
         return this._searchResult.values();
+    }
+
+    protected _recommended = new Set<string>();
+    get recommended(): IterableIterator<string> {
+        return this._recommended.values();
     }
 
     getExtension(id: string): VSXExtension | undefined {
@@ -132,14 +166,15 @@ export class VSXExtensionsModel {
     }, 150);
     protected doUpdateSearchResult(param: VSXSearchParam, token: CancellationToken): Promise<void> {
         return this.doChange(async () => {
-            const result = await this.api.search(param);
+            const client = await this.clientProvider();
+            const result = await client.search(param);
             if (token.isCancellationRequested) {
                 return;
             }
             const searchResult = new Set<string>();
             for (const data of result.extensions) {
                 const id = data.namespace.toLowerCase() + '.' + data.name.toLowerCase();
-                const extension = this.api.getLatestCompatibleVersion(data.allVersions);
+                const extension = client.getLatestCompatibleVersion(data);
                 if (!extension) {
                     continue;
                 }
@@ -158,16 +193,17 @@ export class VSXExtensionsModel {
     }
 
     protected async updateInstalled(): Promise<void> {
+        const prevInstalled = this._installed;
         return this.doChange(async () => {
             const plugins = this.pluginSupport.plugins;
-            const installed = new Set<string>();
+            const currInstalled = new Set<string>();
             const refreshing = [];
             for (const plugin of plugins) {
                 if (plugin.model.engine.type === 'vscode') {
                     const id = plugin.model.id;
                     this._installed.delete(id);
                     const extension = this.setExtension(id);
-                    installed.add(extension.id);
+                    currInstalled.add(extension.id);
                     refreshing.push(this.refresh(id));
                 }
             }
@@ -175,9 +211,44 @@ export class VSXExtensionsModel {
                 refreshing.push(this.refresh(id));
             }
             Promise.all(refreshing);
+            const installed = new Set([...prevInstalled, ...currInstalled]);
             const installedSorted = Array.from(installed).sort((a, b) => this.compareExtensions(a, b));
             this._installed = new Set(installedSorted.values());
         });
+    }
+
+    protected updateRecommended(): Promise<Array<VSXExtension | undefined>> {
+        return this.doChange<Array<VSXExtension | undefined>>(async () => {
+            const allRecommendations = new Set<string>();
+            const allUnwantedRecommendations = new Set<string>();
+
+            const updateRecommendationsForScope = (scope: PreferenceInspectionScope, root?: URI) => {
+                const { recommendations, unwantedRecommendations } = this.getRecommendationsForScope(scope, root);
+                recommendations.forEach(recommendation => allRecommendations.add(recommendation));
+                unwantedRecommendations.forEach(unwantedRecommendation => allUnwantedRecommendations.add(unwantedRecommendation));
+            };
+
+            updateRecommendationsForScope('defaultValue'); // In case there are application-default recommendations.
+            const roots = await this.workspaceService.roots;
+            for (const root of roots) {
+                updateRecommendationsForScope('workspaceFolderValue', root.resource);
+            }
+            if (this.workspaceService.saved) {
+                updateRecommendationsForScope('workspaceValue');
+            }
+            const recommendedSorted = new Set(Array.from(allRecommendations).sort((a, b) => this.compareExtensions(a, b)));
+            allUnwantedRecommendations.forEach(unwantedRecommendation => recommendedSorted.delete(unwantedRecommendation));
+            this._recommended = recommendedSorted;
+            return Promise.all(Array.from(recommendedSorted, plugin => this.refresh(plugin)));
+        });
+    }
+
+    protected getRecommendationsForScope(scope: PreferenceInspectionScope, root?: URI): Required<RecommendedExtensions> {
+        const configuredValue = this.preferences.inspect<Required<RecommendedExtensions>>('extensions', root?.toString())?.[scope];
+        return {
+            recommendations: configuredValue?.recommendations ?? [],
+            unwantedRecommendations: configuredValue?.unwantedRecommendations ?? [],
+        };
     }
 
     resolve(id: string): Promise<VSXExtension> {
@@ -189,7 +260,8 @@ export class VSXExtensionsModel {
             }
             if (extension.readmeUrl) {
                 try {
-                    const rawReadme = await this.api.fetchText(extension.readmeUrl);
+                    const client = await this.clientProvider();
+                    const rawReadme = await client.fetchText(extension.readmeUrl);
                     const readme = this.compileReadme(rawReadme);
                     extension.update({ readme });
                 } catch (e) {
@@ -204,27 +276,32 @@ export class VSXExtensionsModel {
 
     protected compileReadme(readmeMarkdown: string): string {
         const markdownConverter = new showdown.Converter({
+            headerLevelStart: 2,
             noHeaderId: true,
             strikethrough: true,
-            headerLevelStart: 2
+            tables: true,
+            underline: true
         });
 
         const readmeHtml = markdownConverter.makeHtml(readmeMarkdown);
-        return sanitize(readmeHtml, {
-            allowedTags: sanitize.defaults.allowedTags.concat(['h1', 'h2', 'img'])
-        });
+        return DOMPurify.sanitize(readmeHtml);
     }
 
     protected async refresh(id: string): Promise<VSXExtension | undefined> {
         try {
-            const data = await this.api.getLatestCompatibleExtensionVersion(id);
+            let extension = this.getExtension(id);
+            if (!this.shouldRefresh(extension)) {
+                return extension;
+            }
+            const client = await this.clientProvider();
+            const data = await client.getLatestCompatibleExtensionVersion(id);
             if (!data) {
                 return;
             }
             if (data.error) {
                 return this.onDidFailRefresh(id, data.error);
             }
-            const extension = this.setExtension(id);
+            extension = this.setExtension(id);
             extension.update(Object.assign(data, {
                 publisher: data.namespace,
                 downloadUrl: data.files.download,
@@ -237,6 +314,17 @@ export class VSXExtensionsModel {
         } catch (e) {
             return this.onDidFailRefresh(id, e);
         }
+    }
+
+    /**
+     * Determines if the given extension should be refreshed.
+     * @param extension the extension to refresh.
+     */
+    protected shouldRefresh(extension?: VSXExtension): boolean {
+        if (extension === undefined) {
+            return true;
+        }
+        return !extension.builtin;
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

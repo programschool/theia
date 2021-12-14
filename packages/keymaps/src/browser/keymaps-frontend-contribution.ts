@@ -22,32 +22,32 @@ import {
     MenuContribution,
     MenuModelRegistry
 } from '@theia/core/lib/common';
-import { Widget } from '@theia/core/lib/browser';
-import { CommonMenus } from '@theia/core/lib/browser/common-frontend-contribution';
+import { AbstractViewContribution, codicon, Widget } from '@theia/core/lib/browser';
+import { CommonCommands, CommonMenus } from '@theia/core/lib/browser/common-frontend-contribution';
 import { KeymapsService } from './keymaps-service';
 import { KeybindingRegistry } from '@theia/core/lib/browser/keybinding';
-import { AbstractViewContribution } from '@theia/core/lib/browser';
 import { KeybindingWidget } from './keybindings-widget';
 import { TabBarToolbarContribution, TabBarToolbarRegistry } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
+import { nls } from '@theia/core/lib/common/nls';
 
 export namespace KeymapsCommands {
-    export const OPEN_KEYMAPS: Command = {
+    export const OPEN_KEYMAPS = Command.toDefaultLocalizedCommand({
         id: 'keymaps:open',
-        category: 'Settings',
+        category: CommonCommands.PREFERENCES_CATEGORY,
         label: 'Open Keyboard Shortcuts',
-    };
-    export const OPEN_KEYMAPS_JSON: Command = {
+    });
+    export const OPEN_KEYMAPS_JSON = Command.toDefaultLocalizedCommand({
         id: 'keymaps:openJson',
-        category: 'Settings',
+        category: CommonCommands.PREFERENCES_CATEGORY,
         label: 'Open Keyboard Shortcuts (JSON)',
-    };
+    });
     export const OPEN_KEYMAPS_JSON_TOOLBAR: Command = {
         id: 'keymaps:openJson.toolbar',
-        iconClass: 'theia-open-json-icon'
+        iconClass: codicon('json')
     };
     export const CLEAR_KEYBINDINGS_SEARCH: Command = {
         id: 'keymaps.clearSearch',
-        iconClass: 'clear-all'
+        iconClass: codicon('clear-all')
     };
 }
 
@@ -112,13 +112,13 @@ export class KeymapsFrontendContribution extends AbstractViewContribution<Keybin
         toolbar.registerItem({
             id: KeymapsCommands.OPEN_KEYMAPS_JSON_TOOLBAR.id,
             command: KeymapsCommands.OPEN_KEYMAPS_JSON_TOOLBAR.id,
-            tooltip: 'Open Keyboard Shortcuts in JSON',
+            tooltip: nls.localizeByDefault('Open Keyboard Shortcuts (JSON)'),
             priority: 0,
         });
         toolbar.registerItem({
             id: KeymapsCommands.CLEAR_KEYBINDINGS_SEARCH.id,
             command: KeymapsCommands.CLEAR_KEYBINDINGS_SEARCH.id,
-            tooltip: 'Clear Keybindings Search Input',
+            tooltip: nls.localizeByDefault('Clear Keybindings Search Input'),
             priority: 1,
             onDidChange,
         });

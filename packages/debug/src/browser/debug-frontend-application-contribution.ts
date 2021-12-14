@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { AbstractViewContribution, ApplicationShell, KeybindingRegistry, Widget, CompositeTreeNode, LabelProvider } from '@theia/core/lib/browser';
+import { AbstractViewContribution, ApplicationShell, KeybindingRegistry, Widget, CompositeTreeNode, LabelProvider, codicon } from '@theia/core/lib/browser';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { ThemeService } from '@theia/core/lib/browser/theming';
 import { MenuModelRegistry, CommandRegistry, MAIN_MENU_BAR, Command, Emitter, Mutable } from '@theia/core/lib/common';
@@ -51,6 +51,7 @@ import { ColorContribution } from '@theia/core/lib/browser/color-application-con
 import { ColorRegistry } from '@theia/core/lib/browser/color-registry';
 import { DebugFunctionBreakpoint } from './model/debug-function-breakpoint';
 import { DebugBreakpoint } from './model/debug-breakpoint';
+import { nls } from '@theia/core/lib/common/nls';
 
 export namespace DebugMenus {
     export const DEBUG = [...MAIN_MENU_BAR, '6_debug'];
@@ -63,214 +64,242 @@ export namespace DebugMenus {
     export const DEBUG_BREAKPOINTS = [...DEBUG, 'f_breakpoints'];
 }
 
+function nlsEditBreakpoint(breakpointKey: string, breakpoint: string): string {
+    return nls.localizeByDefault('Edit {0}...', nls.localize(`vscode/breakpointEditorContribution/${breakpointKey}`, breakpoint));
+}
+
+function nlsRemoveBreakpoint(breakpointKey: string, breakpoint: string): string {
+    return nls.localizeByDefault('Remove {0}',
+        nls.localize(`vscode/breakpointEditorContribution/${breakpointKey}`, breakpoint));
+}
+
+function nlsEnableBreakpoint(breakpointKey: string, breakpoint: string): string {
+    return nls.localizeByDefault('Enable {0}',
+        nls.localize(`vscode/breakpointEditorContribution/${breakpointKey}`, breakpoint));
+}
+
+function nlsDisableBreakpoint(breakpointKey: string, breakpoint: string): string {
+    return nls.localizeByDefault('Disable {0}',
+        nls.localize(`vscode/breakpointEditorContribution/${breakpointKey}`, breakpoint));
+}
+
 export namespace DebugCommands {
 
-    const DEBUG_CATEGORY = 'Debug';
+    export const DEBUG_CATEGORY = 'Debug';
+    export const DEBUG_CATEGORY_KEY = nls.getDefaultKey(DEBUG_CATEGORY);
 
-    export const START: Command = {
+    export const START = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.debug.start',
         category: DEBUG_CATEGORY,
         label: 'Start Debugging',
-        iconClass: 'fa fa-play'
-    };
-    export const START_NO_DEBUG: Command = {
+        iconClass: codicon('debug-alt')
+    });
+    export const START_NO_DEBUG = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.debug.run',
-        label: 'Debug: Start Without Debugging'
-    };
-    export const STOP: Command = {
+        category: DEBUG_CATEGORY,
+        label: 'Start Without Debugging'
+    });
+    export const STOP = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.debug.stop',
         category: DEBUG_CATEGORY,
-        label: 'Stop Debugging',
-        iconClass: 'fa fa-stop'
-    };
-    export const RESTART: Command = {
+        label: 'Stop',
+        iconClass: codicon('debug-stop')
+    });
+    export const RESTART = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.debug.restart',
         category: DEBUG_CATEGORY,
-        label: 'Restart Debugging',
-    };
+        label: 'Restart',
+    });
 
-    export const OPEN_CONFIGURATIONS = {
+    export const OPEN_CONFIGURATIONS = Command.toDefaultLocalizedCommand({
         id: 'debug.configurations.open',
-        label: 'Debug: Open Configurations'
-    };
-    export const ADD_CONFIGURATION = {
+        category: DEBUG_CATEGORY,
+        label: 'Open Configurations'
+    });
+    export const ADD_CONFIGURATION = Command.toDefaultLocalizedCommand({
         id: 'debug.configurations.add',
-        label: 'Debug: Add Configuration...'
-    };
+        category: DEBUG_CATEGORY,
+        label: 'Add Configuration...'
+    });
 
-    export const STEP_OVER: Command = {
+    export const STEP_OVER = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.debug.stepOver',
         category: DEBUG_CATEGORY,
         label: 'Step Over',
-        iconClass: 'fa fa-arrow-right'
-    };
-    export const STEP_INTO: Command = {
+        iconClass: codicon('debug-step-over')
+    });
+    export const STEP_INTO = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.debug.stepInto',
         category: DEBUG_CATEGORY,
         label: 'Step Into',
-        iconClass: 'fa fa-arrow-down'
-    };
-    export const STEP_OUT: Command = {
+        iconClass: codicon('debug-step-into')
+    });
+    export const STEP_OUT = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.debug.stepOut',
         category: DEBUG_CATEGORY,
         label: 'Step Out',
-        iconClass: 'fa fa-arrow-up'
-    };
-    export const CONTINUE: Command = {
+        iconClass: codicon('debug-step-out')
+    });
+    export const CONTINUE = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.debug.continue',
         category: DEBUG_CATEGORY,
         label: 'Continue',
-        iconClass: 'fa fa-play-circle'
-    };
-    export const PAUSE: Command = {
+        iconClass: codicon('debug-continue')
+    });
+    export const PAUSE = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.debug.pause',
         category: DEBUG_CATEGORY,
         label: 'Pause',
-        iconClass: 'fa fa-pause'
-    };
-    export const CONTINUE_ALL: Command = {
+        iconClass: codicon('debug-pause')
+    });
+    export const CONTINUE_ALL = Command.toLocalizedCommand({
         id: 'debug.thread.continue.all',
         category: DEBUG_CATEGORY,
         label: 'Continue All',
-        iconClass: 'fa fa-play-circle'
-    };
-    export const PAUSE_ALL: Command = {
+        iconClass: codicon('debug-continue')
+    }, 'theia/debug/continueAll', DEBUG_CATEGORY_KEY);
+    export const PAUSE_ALL = Command.toLocalizedCommand({
         id: 'debug.thread.pause.all',
         category: DEBUG_CATEGORY,
         label: 'Pause All',
-        iconClass: 'fa fa-pause'
-    };
+        iconClass: codicon('debug-pause')
+    }, 'theia/debug/pauseAll', DEBUG_CATEGORY_KEY);
 
-    export const TOGGLE_BREAKPOINT: Command = {
+    export const TOGGLE_BREAKPOINT = Command.toDefaultLocalizedCommand({
         id: 'editor.debug.action.toggleBreakpoint',
         category: DEBUG_CATEGORY,
         label: 'Toggle Breakpoint',
-    };
-    export const INLINE_BREAKPOINT: Command = {
+    });
+    export const INLINE_BREAKPOINT = Command.toDefaultLocalizedCommand({
         id: 'editor.debug.action.inlineBreakpoint',
         category: DEBUG_CATEGORY,
         label: 'Inline Breakpoint',
-    };
-    export const ADD_CONDITIONAL_BREAKPOINT: Command = {
+    });
+    export const ADD_CONDITIONAL_BREAKPOINT = Command.toDefaultLocalizedCommand({
         id: 'debug.breakpoint.add.conditional',
         category: DEBUG_CATEGORY,
         label: 'Add Conditional Breakpoint...',
-    };
-    export const ADD_LOGPOINT: Command = {
+    });
+    export const ADD_LOGPOINT = Command.toDefaultLocalizedCommand({
         id: 'debug.breakpoint.add.logpoint',
         category: DEBUG_CATEGORY,
         label: 'Add Logpoint...',
-    };
-    export const ADD_FUNCTION_BREAKPOINT: Command = {
+    });
+    export const ADD_FUNCTION_BREAKPOINT = Command.toDefaultLocalizedCommand({
         id: 'debug.breakpoint.add.function',
         category: DEBUG_CATEGORY,
-        label: 'Add Function Breakpoint...',
-    };
-    export const ENABLE_ALL_BREAKPOINTS: Command = {
+        label: 'Add Function Breakpoint',
+    });
+    export const ENABLE_ALL_BREAKPOINTS = Command.toDefaultLocalizedCommand({
         id: 'debug.breakpoint.enableAll',
         category: DEBUG_CATEGORY,
         label: 'Enable All Breakpoints',
-    };
-    export const DISABLE_ALL_BREAKPOINTS: Command = {
+    });
+    export const DISABLE_ALL_BREAKPOINTS = Command.toDefaultLocalizedCommand({
         id: 'debug.breakpoint.disableAll',
         category: DEBUG_CATEGORY,
         label: 'Disable All Breakpoints',
-    };
-    export const EDIT_BREAKPOINT: Command = {
+    });
+    export const EDIT_BREAKPOINT = Command.toLocalizedCommand({
         id: 'debug.breakpoint.edit',
         category: DEBUG_CATEGORY,
-        label: 'Edit Breakpoint...',
-    };
-    export const EDIT_LOGPOINT: Command = {
+        originalLabel: 'Edit Breakpoint...',
+        label: nlsEditBreakpoint('breakpoint', 'Breakpoint')
+    }, '', DEBUG_CATEGORY_KEY);
+    export const EDIT_LOGPOINT = Command.toLocalizedCommand({
         id: 'debug.logpoint.edit',
         category: DEBUG_CATEGORY,
-        label: 'Edit Logpoint...',
-    };
-    export const REMOVE_BREAKPOINT: Command = {
+        originalLabel: 'Edit Logpoint...',
+        label: nlsEditBreakpoint('logPoint', 'Logpoint')
+    }, '', DEBUG_CATEGORY_KEY);
+    export const REMOVE_BREAKPOINT = Command.toLocalizedCommand({
         id: 'debug.breakpoint.remove',
         category: DEBUG_CATEGORY,
-        label: 'Remove Breakpoint',
-    };
-    export const REMOVE_LOGPOINT: Command = {
+        originalLabel: 'Remove Breakpoint',
+        label: nlsRemoveBreakpoint('breakpoint', 'Breakpoint')
+    }, '', DEBUG_CATEGORY_KEY);
+    export const REMOVE_LOGPOINT = Command.toLocalizedCommand({
         id: 'debug.logpoint.remove',
         category: DEBUG_CATEGORY,
-        label: 'Remove Logpoint',
-    };
-    export const REMOVE_ALL_BREAKPOINTS: Command = {
+        originalLabel: 'Remove Logpoint',
+        label: nlsRemoveBreakpoint('logPoint', 'Logpoint')
+    }, '', DEBUG_CATEGORY_KEY);
+    export const REMOVE_ALL_BREAKPOINTS = Command.toDefaultLocalizedCommand({
         id: 'debug.breakpoint.removeAll',
         category: DEBUG_CATEGORY,
         label: 'Remove All Breakpoints',
-    };
-    export const TOGGLE_BREAKPOINTS_ENABLED: Command = {
+    });
+    export const TOGGLE_BREAKPOINTS_ENABLED = Command.toLocalizedCommand({
         id: 'debug.breakpoint.toggleEnabled'
-    };
-    export const SHOW_HOVER = {
+    });
+    export const SHOW_HOVER = Command.toDefaultLocalizedCommand({
         id: 'editor.debug.action.showDebugHover',
-        label: 'Debug: Show Hover'
-    };
+        category: DEBUG_CATEGORY,
+        label: 'Show Hover'
+    });
 
-    export const RESTART_FRAME: Command = {
+    export const RESTART_FRAME = Command.toDefaultLocalizedCommand({
         id: 'debug.frame.restart',
         category: DEBUG_CATEGORY,
         label: 'Restart Frame',
-    };
-    export const COPY_CALL_STACK: Command = {
+    });
+    export const COPY_CALL_STACK = Command.toDefaultLocalizedCommand({
         id: 'debug.callStack.copy',
         category: DEBUG_CATEGORY,
         label: 'Copy Call Stack',
-    };
+    });
 
-    export const SET_VARIABLE_VALUE: Command = {
+    export const SET_VARIABLE_VALUE = Command.toDefaultLocalizedCommand({
         id: 'debug.variable.setValue',
         category: DEBUG_CATEGORY,
         label: 'Set Value',
-    };
-    export const COPY_VARIABLE_VALUE: Command = {
+    });
+    export const COPY_VARIABLE_VALUE = Command.toDefaultLocalizedCommand({
         id: 'debug.variable.copyValue',
         category: DEBUG_CATEGORY,
         label: 'Copy Value',
-    };
-    export const COPY_VARIABLE_AS_EXPRESSION: Command = {
+    });
+    export const COPY_VARIABLE_AS_EXPRESSION = Command.toDefaultLocalizedCommand({
         id: 'debug.variable.copyAsExpression',
         category: DEBUG_CATEGORY,
-        label: 'Copy As Expression',
-    };
-    export const WATCH_VARIABLE: Command = {
+        label: 'Copy as Expression',
+    });
+    export const WATCH_VARIABLE = Command.toDefaultLocalizedCommand({
         id: 'debug.variable.watch',
         category: DEBUG_CATEGORY,
         label: 'Add to Watch',
-    };
+    });
 
-    export const ADD_WATCH_EXPRESSION: Command = {
+    export const ADD_WATCH_EXPRESSION = Command.toDefaultLocalizedCommand({
         id: 'debug.watch.addExpression',
         category: DEBUG_CATEGORY,
-        label: 'Add Watch Expression'
-    };
-    export const EDIT_WATCH_EXPRESSION: Command = {
+        label: 'Add Expression'
+    });
+    export const EDIT_WATCH_EXPRESSION = Command.toDefaultLocalizedCommand({
         id: 'debug.watch.editExpression',
         category: DEBUG_CATEGORY,
-        label: 'Edit Watch Expression'
-    };
-    export const COPY_WATCH_EXPRESSION_VALUE: Command = {
+        label: 'Edit Expression'
+    });
+    export const COPY_WATCH_EXPRESSION_VALUE = Command.toLocalizedCommand({
         id: 'debug.watch.copyExpressionValue',
         category: DEBUG_CATEGORY,
-        label: 'Copy Watch Expression Value'
-    };
-    export const REMOVE_WATCH_EXPRESSION: Command = {
+        label: 'Copy Expression Value'
+    }, 'theia/debug/copyExpressionValue', DEBUG_CATEGORY_KEY);
+    export const REMOVE_WATCH_EXPRESSION = Command.toDefaultLocalizedCommand({
         id: 'debug.watch.removeExpression',
         category: DEBUG_CATEGORY,
-        label: 'Remove Watch Expression'
-    };
-    export const COLLAPSE_ALL_WATCH_EXPRESSIONS: Command = {
+        label: 'Remove Expression'
+    });
+    export const COLLAPSE_ALL_WATCH_EXPRESSIONS = Command.toDefaultLocalizedCommand({
         id: 'debug.watch.collapseAllExpressions',
         category: DEBUG_CATEGORY,
-        label: 'Collapse All Watch Expressions'
-    };
-    export const REMOVE_ALL_WATCH_EXPRESSIONS: Command = {
+        label: 'Collapse All'
+    });
+    export const REMOVE_ALL_WATCH_EXPRESSIONS = Command.toDefaultLocalizedCommand({
         id: 'debug.watch.removeAllExpressions',
         category: DEBUG_CATEGORY,
-        label: 'Remove All Watch Expressions'
-    };
+        label: 'Remove All Expressions'
+    });
 }
 export namespace DebugThreadContextCommands {
     export const STEP_OVER = {
@@ -376,7 +405,7 @@ function updateTheme(): void {
     }
 }
 updateTheme();
-ThemeService.get().onThemeChange(() => updateTheme());
+ThemeService.get().onDidColorThemeChange(() => updateTheme());
 
 @injectable()
 export class DebugFrontendApplicationContribution extends AbstractViewContribution<DebugWidget> implements TabBarToolbarContribution, ColorContribution {
@@ -478,20 +507,26 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
         this.watchManager.save();
     }
 
+    onWillStop(): boolean {
+        return this.preference['debug.confirmOnExit'] === 'always' && !!this.manager.currentSession;
+    }
+
     registerMenus(menus: MenuModelRegistry): void {
         super.registerMenus(menus);
         const registerMenuActions = (menuPath: string[], ...commands: Command[]) => {
             for (const [index, command] of commands.entries()) {
+                const label = command.label;
+                const debug = `${DebugCommands.DEBUG_CATEGORY}:`;
                 menus.registerMenuAction(menuPath, {
                     commandId: command.id,
-                    label: command.label && command.label.startsWith('Debug: ') && command.label.slice('Debug: '.length) || command.label,
+                    label: label && label.startsWith(debug) && label.slice(debug.length).trimStart() || label,
                     icon: command.iconClass,
                     order: String.fromCharCode('a'.charCodeAt(0) + index)
                 });
             }
         };
 
-        menus.registerSubmenu(DebugMenus.DEBUG, 'Run');
+        menus.registerSubmenu(DebugMenus.DEBUG, nls.localizeByDefault('Run'));
         registerMenuActions(DebugMenus.DEBUG_CONTROLS,
             DebugCommands.START,
             DebugCommands.START_NO_DEBUG,
@@ -516,7 +551,7 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
         registerMenuActions(DebugMenus.DEBUG_BREAKPOINT,
             DebugCommands.TOGGLE_BREAKPOINT
         );
-        menus.registerSubmenu(DebugMenus.DEBUG_NEW_BREAKPOINT, 'New Breakpoint');
+        menus.registerSubmenu(DebugMenus.DEBUG_NEW_BREAKPOINT, nls.localizeByDefault('New Breakpoint'));
         registerMenuActions(DebugMenus.DEBUG_NEW_BREAKPOINT,
             DebugCommands.ADD_CONDITIONAL_BREAKPOINT,
             DebugCommands.INLINE_BREAKPOINT,
@@ -539,15 +574,15 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
             { ...DebugCommands.CONTINUE_ALL, ...DebugSessionContextCommands.CONTINUE_ALL }
         );
         registerMenuActions(DebugThreadsWidget.TERMINATE_MENU,
-            { ...DebugCommands.RESTART, ...DebugSessionContextCommands.RESTART, label: 'Restart' },
-            { ...DebugCommands.STOP, ...DebugSessionContextCommands.STOP, label: 'Stop' },
-            { ...DebugThreadContextCommands.TERMINATE, label: 'Terminate Thread' }
+            { ...DebugCommands.RESTART, ...DebugSessionContextCommands.RESTART },
+            { ...DebugCommands.STOP, ...DebugSessionContextCommands.STOP },
+            { ...DebugThreadContextCommands.TERMINATE, label: nls.localizeByDefault('Terminate Thread') }
         );
         registerMenuActions(DebugThreadsWidget.OPEN_MENU,
-            { ...DebugSessionContextCommands.REVEAL, label: 'Reveal' },
-            { ...DebugSessionContextCommands.OPEN_LEFT, label: 'Open Left' },
-            { ...DebugSessionContextCommands.OPEN_RIGHT, label: 'Open Right' },
-            { ...DebugSessionContextCommands.OPEN_BOTTOM, label: 'Open Bottom' }
+            { ...DebugSessionContextCommands.REVEAL, label: nls.localize('theia/debug/reveal', 'Reveal') },
+            { ...DebugSessionContextCommands.OPEN_LEFT, label: nls.localize('theia/debug/openLeft', 'Open Left') },
+            { ...DebugSessionContextCommands.OPEN_RIGHT, label: nls.localize('theia/debug/openRight', 'Open Right') },
+            { ...DebugSessionContextCommands.OPEN_BOTTOM, label: nls.localize('theia/debug/openBottom', 'Open Bottom') }
         );
 
         registerMenuActions(DebugStackFramesWidget.CONTEXT_MENU,
@@ -565,12 +600,12 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
         );
 
         registerMenuActions(DebugWatchWidget.EDIT_MENU,
-            { ...DebugCommands.EDIT_WATCH_EXPRESSION, label: 'Edit Expression' },
-            { ...DebugCommands.COPY_WATCH_EXPRESSION_VALUE, label: 'Copy Value' }
+            DebugCommands.EDIT_WATCH_EXPRESSION,
+            DebugCommands.COPY_WATCH_EXPRESSION_VALUE
         );
         registerMenuActions(DebugWatchWidget.REMOVE_MENU,
-            { ...DebugCommands.REMOVE_WATCH_EXPRESSION, label: 'Remove Expression' },
-            { ...DebugCommands.REMOVE_ALL_WATCH_EXPRESSIONS, label: 'Remove All Expressions' }
+            DebugCommands.REMOVE_WATCH_EXPRESSION,
+            DebugCommands.REMOVE_ALL_WATCH_EXPRESSIONS
         );
 
         registerMenuActions(DebugBreakpointsWidget.EDIT_MENU,
@@ -588,17 +623,17 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
         );
 
         registerMenuActions(DebugEditorModel.CONTEXT_MENU,
-            { ...DebugEditorContextCommands.ADD_BREAKPOINT, label: 'Add Breakpoint' },
+            { ...DebugEditorContextCommands.ADD_BREAKPOINT, label: nls.localizeByDefault('Add Breakpoint') },
             { ...DebugEditorContextCommands.ADD_CONDITIONAL_BREAKPOINT, label: DebugCommands.ADD_CONDITIONAL_BREAKPOINT.label },
             { ...DebugEditorContextCommands.ADD_LOGPOINT, label: DebugCommands.ADD_LOGPOINT.label },
             { ...DebugEditorContextCommands.REMOVE_BREAKPOINT, label: DebugCommands.REMOVE_BREAKPOINT.label },
             { ...DebugEditorContextCommands.EDIT_BREAKPOINT, label: DebugCommands.EDIT_BREAKPOINT.label },
-            { ...DebugEditorContextCommands.ENABLE_BREAKPOINT, label: 'Enable Breakpoint' },
-            { ...DebugEditorContextCommands.DISABLE_BREAKPOINT, label: 'Disable Breakpoint' },
+            { ...DebugEditorContextCommands.ENABLE_BREAKPOINT, label: nlsEnableBreakpoint('breakpoint', 'Breakpoint') },
+            { ...DebugEditorContextCommands.DISABLE_BREAKPOINT, label: nlsDisableBreakpoint('breakpoint', 'Breakpoint') },
             { ...DebugEditorContextCommands.REMOVE_LOGPOINT, label: DebugCommands.REMOVE_LOGPOINT.label },
             { ...DebugEditorContextCommands.EDIT_LOGPOINT, label: DebugCommands.EDIT_LOGPOINT.label },
-            { ...DebugEditorContextCommands.ENABLE_LOGPOINT, label: 'Enable Logpoint' },
-            { ...DebugEditorContextCommands.DISABLE_LOGPOINT, label: 'Disable Logpoint' }
+            { ...DebugEditorContextCommands.ENABLE_LOGPOINT, label: nlsEnableBreakpoint('logPoint', 'Logpoint') },
+            { ...DebugEditorContextCommands.DISABLE_LOGPOINT, label: nlsDisableBreakpoint('logPoint', 'Logpoint') }
         );
     }
 
@@ -611,11 +646,11 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
             execute: (config?: DebugSessionOptions) => this.start(true, config)
         });
         registry.registerCommand(DebugCommands.STOP, {
-            execute: () => this.manager.currentSession && this.manager.currentSession.terminate(),
+            execute: () => this.manager.terminateSession(),
             isEnabled: () => this.manager.state !== DebugState.Inactive
         });
         registry.registerCommand(DebugCommands.RESTART, {
-            execute: () => this.manager.restart(),
+            execute: () => this.manager.restartSession(),
             isEnabled: () => this.manager.state !== DebugState.Inactive
         });
 
@@ -687,12 +722,12 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
         });
 
         registry.registerCommand(DebugSessionContextCommands.STOP, {
-            execute: () => this.selectedSession && this.selectedSession.terminate(),
+            execute: () => this.selectedSession && this.manager.terminateSession(this.selectedSession),
             isEnabled: () => !!this.selectedSession && this.selectedSession.state !== DebugState.Inactive,
             isVisible: () => !this.selectedThread
         });
         registry.registerCommand(DebugSessionContextCommands.RESTART, {
-            execute: () => this.selectedSession && this.manager.restart(this.selectedSession),
+            execute: () => this.selectedSession && this.manager.restartSession(this.selectedSession),
             isEnabled: () => !!this.selectedSession && this.selectedSession.state !== DebugState.Inactive,
             isVisible: () => !this.selectedThread
         });
@@ -1067,12 +1102,14 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
         const toggleBreakpointsEnabled: Mutable<TabBarToolbarItem> = {
             id: DebugCommands.TOGGLE_BREAKPOINTS_ENABLED.id,
             command: DebugCommands.TOGGLE_BREAKPOINTS_ENABLED.id,
-            icon: 'fa breakpoints-activate',
+            icon: codicon('activate-breakpoints'),
             onDidChange: onDidChangeToggleBreakpointsEnabled.event,
             priority: 1
         };
         const updateToggleBreakpointsEnabled = () => {
-            const tooltip = this.breakpointManager.breakpointsEnabled ? 'Deactivate Breakpoints' : 'Activate Breakpoints';
+            const activateBreakpoints = nls.localizeByDefault('Enable All Breakpoints');
+            const deactivateBreakpoints = nls.localizeByDefault('Disable All Breakpoints');
+            const tooltip = this.breakpointManager.breakpointsEnabled ? deactivateBreakpoints : activateBreakpoints;
             if (toggleBreakpointsEnabled.tooltip !== tooltip) {
                 toggleBreakpointsEnabled.tooltip = tooltip;
                 onDidChangeToggleBreakpointsEnabled.fire(undefined);
@@ -1081,8 +1118,8 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
         toolbar.registerItem({
             id: DebugCommands.ADD_FUNCTION_BREAKPOINT.id,
             command: DebugCommands.ADD_FUNCTION_BREAKPOINT.id,
-            icon: 'theia-add-icon',
-            tooltip: 'Add Function Breakpoint'
+            icon: codicon('add'),
+            tooltip: DebugCommands.ADD_FUNCTION_BREAKPOINT.label
         });
         updateToggleBreakpointsEnabled();
         this.breakpointManager.onDidChangeBreakpoints(updateToggleBreakpointsEnabled);
@@ -1090,28 +1127,28 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
         toolbar.registerItem({
             id: DebugCommands.REMOVE_ALL_BREAKPOINTS.id,
             command: DebugCommands.REMOVE_ALL_BREAKPOINTS.id,
-            icon: 'theia-remove-all-icon',
+            icon: codicon('close-all'),
             priority: 2
         });
 
         toolbar.registerItem({
             id: DebugCommands.ADD_WATCH_EXPRESSION.id,
             command: DebugCommands.ADD_WATCH_EXPRESSION.id,
-            icon: 'theia-add-icon',
-            tooltip: 'Add Expression'
+            icon: codicon('add'),
+            tooltip: DebugCommands.ADD_WATCH_EXPRESSION.label
         });
         toolbar.registerItem({
             id: DebugCommands.COLLAPSE_ALL_WATCH_EXPRESSIONS.id,
             command: DebugCommands.COLLAPSE_ALL_WATCH_EXPRESSIONS.id,
-            icon: 'theia-collapse-all-icon',
-            tooltip: 'Collapse All',
+            icon: codicon('collapse-all'),
+            tooltip: DebugCommands.COLLAPSE_ALL_WATCH_EXPRESSIONS.label,
             priority: 1
         });
         toolbar.registerItem({
             id: DebugCommands.REMOVE_ALL_WATCH_EXPRESSIONS.id,
             command: DebugCommands.REMOVE_ALL_WATCH_EXPRESSIONS.id,
-            icon: 'theia-remove-all-icon',
-            tooltip: 'Remove All Expressions',
+            icon: codicon('close-all'),
+            tooltip: DebugCommands.REMOVE_ALL_WATCH_EXPRESSIONS.label,
             priority: 2
         });
     }
@@ -1123,8 +1160,8 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
     protected async openSession(
         session: DebugSession,
         options?: {
-            debugViewLocation?: DebugViewLocation
-            reveal?: boolean
+            debugViewLocation?: DebugViewLocation;
+            reveal?: boolean;
         }
     ): Promise<DebugWidget | DebugSessionWidget> {
         const { debugViewLocation, reveal } = {
@@ -1248,16 +1285,79 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
 
     registerColors(colors: ColorRegistry): void {
         colors.register(
-            // Debug colors should be aligned with https://code.visualstudio.com/api/references/theme-color#debug
+            // Debug colors should be aligned with https://code.visualstudio.com/api/references/theme-color#debug-colors
             {
                 id: 'editor.stackFrameHighlightBackground',
-                defaults: { dark: '#ffff0033', light: '#ffff6673', hc: '#fff600' },
-                description: 'Background color for the highlight of line at the top stack frame position.'
-            }, {
-            id: 'editor.focusedStackFrameHighlightBackground',
-            defaults: { dark: '#7abd7a4d', light: '#cee7ce73', hc: '#cee7ce' },
-            description: 'Background color for the highlight of line at focused stack frame position.'
-        },
+                defaults: {
+                    dark: '#ffff0033',
+                    light: '#ffff6673',
+                    hc: '#fff600'
+                }, description: 'Background color for the highlight of line at the top stack frame position.'
+            },
+            {
+                id: 'editor.focusedStackFrameHighlightBackground',
+                defaults: {
+                    dark: '#7abd7a4d',
+                    light: '#cee7ce73',
+                    hc: '#cee7ce'
+                }, description: 'Background color for the highlight of line at focused stack frame position.'
+            },
+            {
+                id: 'debugIcon.startForeground', defaults: {
+                    dark: '#89D185',
+                    light: '#388A34',
+                    hc: '#89D185'
+                }, description: 'Debug toolbar icon for start debugging.'
+            },
+            {
+                id: 'debugIcon.pauseForeground', defaults: {
+                    dark: '#75BEFF',
+                    light: '#007ACC',
+                    hc: '#75BEFF'
+                }, description: 'Debug toolbar icon for pause.'
+            },
+            {
+                id: 'debugIcon.stopForeground', defaults: {
+                    dark: '#F48771',
+                    light: '#A1260D',
+                    hc: '#F48771'
+                }, description: 'Debug toolbar icon for stop.'
+            },
+            {
+                id: 'debugIcon.restartForeground', defaults: {
+                    dark: '#89D185',
+                    light: '#388A34',
+                    hc: '#89D185'
+                }, description: 'Debug toolbar icon for restart.'
+            },
+            {
+                id: 'debugIcon.stepOverForeground', defaults: {
+                    dark: '#75BEFF',
+                    light: '#007ACC',
+                    hc: '#75BEFF'
+                }, description: 'Debug toolbar icon for step over.'
+            },
+            {
+                id: 'debugIcon.stepIntoForeground', defaults: {
+                    dark: '#75BEFF',
+                    light: '#007ACC',
+                    hc: '#75BEFF'
+                }, description: 'Debug toolbar icon for step into.'
+            },
+            {
+                id: 'debugIcon.stepOutForeground', defaults: {
+                    dark: '#75BEFF',
+                    light: '#007ACC',
+                    hc: '#75BEFF'
+                }, description: 'Debug toolbar icon for step out.'
+            },
+            {
+                id: 'debugIcon.continueForeground', defaults: {
+                    dark: '#75BEFF',
+                    light: '#007ACC',
+                    hc: '#75BEFF'
+                }, description: 'Debug toolbar icon for continue.'
+            },
             // Status bar colors should be aligned with debugging colors from https://code.visualstudio.com/api/references/theme-color#status-bar-colors
             {
                 id: 'statusBar.debuggingBackground', defaults: {
@@ -1284,13 +1384,18 @@ export class DebugFrontendApplicationContribution extends AbstractViewContributi
             // https://github.com/microsoft/vscode/blob/ff5f581425da6230b6f9216ecf19abf6c9d285a6/src/vs/workbench/contrib/debug/browser/exceptionWidget.ts#L23
             {
                 id: 'debugExceptionWidget.border', defaults: {
-                    dark: '#a31515', light: '#a31515', hc: '#a31515'
+                    dark: '#a31515',
+                    light: '#a31515',
+                    hc: '#a31515'
                 }, description: 'Exception widget border color.',
-            }, {
-            id: 'debugExceptionWidget.background', defaults: {
-                dark: '#420b0d', light: '#f1dfde', hc: '#420b0d'
-            }, description: 'Exception widget background color.'
-        }
+            },
+            {
+                id: 'debugExceptionWidget.background', defaults: {
+                    dark: '#420b0d',
+                    light: '#f1dfde',
+                    hc: '#420b0d'
+                }, description: 'Exception widget background color.'
+            }
         );
     }
 

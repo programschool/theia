@@ -113,7 +113,13 @@ In order to create a new release, one must:
    ```md
    [Release Changelog](https://github.com/eclipse-theia/theia/blob/2aa2fa1ab091ec36ef851c4e364b322301cddb40/CHANGELOG.md#v120)
    ```
-
+   
+- include a reference to the migration guide in the release description:
+   
+   ```md
+   [Migration Guide](https://github.com/eclipse-theia/theia/blob/master/doc/Migration.md)
+   ```
+    
 - select _"Publish Release"_ bottom at the bottom of the page.
 
 For additional information, please consult the official GitHub documentation regarding [creating releases](https://help.github.com/en/github/administering-a-repository/managing-releases-in-a-repository#creating-a-release).
@@ -149,7 +155,8 @@ Login to [Eclipse Foundation Theia project page]( https://projects.eclipse.org/p
 
 ### Announce Release is Completed
 
-Update the forum release post to announce that the release has completed.
+- Update the forum release post to announce that the release has completed.
+- Submit to "Theia News", so that a Tweet will be created by the Twitter managers. Use [this template](https://github.com/eclipse-theia/theia/wiki/Eclipse-Theia-Twitter-strategy#release-announcement-no-review) for the message and post it [here](https://forms.gle/ccS6qawpS54FQZht5).
 
 
 ### Yarn Upgrade
@@ -168,5 +175,5 @@ To successfully complete a `yarn upgrade`, one must:
 
 ### Update Roadmap
 
-* If the current release is the last in a quarter, ask the team to update the [roadmap](https://github.com/eclipse-theia/theia/wiki/Roadmap) of the past quarter (close, remove or move items)
-* If the current release is the second in a quarter, create [roadmap template](https://github.com/eclipse-theia/theia/wiki/Roadmap) for the next quarter, ask the team to contribute to it and add it to the agenda of the Theia dev meeting
+* If the current release is the last in a quarter, ask the team to update the [roadmap](https://github.com/eclipse-theia/theia/wiki/Eclipse-Theia-Roadmap) of the past quarter (close, remove or move items)
+* If the current release is the second in a quarter, create [roadmap template](https://github.com/eclipse-theia/theia/wiki/Eclipse-Theia-Roadmap) for the next quarter, ask the team to contribute to it and add it to the agenda of the Theia dev meeting

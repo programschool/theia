@@ -17,27 +17,33 @@
 import '../../src/browser/style/index.css';
 
 import { ContainerModule } from '@theia/core/shared/inversify';
-import { WidgetFactory, bindViewContribution, FrontendApplicationContribution, ViewContainerIdentifier, OpenHandler, WidgetManager } from '@theia/core/lib/browser';
+import {
+    WidgetFactory, bindViewContribution, FrontendApplicationContribution, ViewContainerIdentifier, OpenHandler, WidgetManager, WebSocketConnectionProvider
+} from '@theia/core/lib/browser';
 import { VSXExtensionsViewContainer } from './vsx-extensions-view-container';
 import { VSXExtensionsContribution } from './vsx-extensions-contribution';
 import { VSXExtensionsSearchBar } from './vsx-extensions-search-bar';
-import { VSXRegistryAPI } from '../common/vsx-registry-api';
 import { VSXExtensionsModel } from './vsx-extensions-model';
 import { ColorContribution } from '@theia/core/lib/browser/color-application-contribution';
 import { VSXExtensionsWidget, VSXExtensionsWidgetOptions } from './vsx-extensions-widget';
-import { TabBarToolbarContribution } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
 import { VSXExtensionFactory, VSXExtension, VSXExtensionOptions } from './vsx-extension';
 import { VSXExtensionEditor } from './vsx-extension-editor';
 import { VSXExtensionEditorManager } from './vsx-extension-editor-manager';
 import { VSXExtensionsSourceOptions } from './vsx-extensions-source';
-import { VSXEnvironment } from '../common/vsx-environment';
 import { VSXExtensionsSearchModel } from './vsx-extensions-search-model';
-import { VSXApiVersionProviderImpl } from './vsx-api-version-provider-frontend-impl';
-import { VSXApiVersionProvider } from '../common/vsx-api-version-provider';
+import { bindExtensionPreferences } from './recommended-extensions/recommended-extensions-preference-contribution';
+import { bindPreferenceProviderOverrides } from './recommended-extensions/preference-provider-overrides';
+import { OVSXClientProvider, createOVSXClient } from '../common/ovsx-client-provider';
+import { VSXEnvironment, VSX_ENVIRONMENT_PATH } from '../common/vsx-environment';
 
-export default new ContainerModule(bind => {
-    bind(VSXEnvironment).toSelf().inRequestScope();
-    bind(VSXRegistryAPI).toSelf().inSingletonScope();
+export default new ContainerModule((bind, unbind) => {
+    bind<OVSXClientProvider>(OVSXClientProvider).toDynamicValue(ctx => {
+        const clientPromise = createOVSXClient(ctx.container.get(VSXEnvironment));
+        return () => clientPromise;
+    }).inSingletonScope();
+    bind(VSXEnvironment).toDynamicValue(
+        ctx => WebSocketConnectionProvider.createProxy(ctx.container, VSX_ENVIRONMENT_PATH)
+    ).inSingletonScope();
 
     bind(VSXExtension).toSelf();
     bind(VSXExtensionFactory).toFactory(ctx => (option: VSXExtensionOptions) => {
@@ -75,7 +81,12 @@ export default new ContainerModule(bind => {
             child.bind(VSXExtensionsViewContainer).toSelf();
             const viewContainer = child.get(VSXExtensionsViewContainer);
             const widgetManager = child.get(WidgetManager);
-            for (const id of [VSXExtensionsSourceOptions.SEARCH_RESULT, VSXExtensionsSourceOptions.INSTALLED, VSXExtensionsSourceOptions.BUILT_IN]) {
+            for (const id of [
+                VSXExtensionsSourceOptions.SEARCH_RESULT,
+                VSXExtensionsSourceOptions.RECOMMENDED,
+                VSXExtensionsSourceOptions.INSTALLED,
+                VSXExtensionsSourceOptions.BUILT_IN,
+            ]) {
                 const widget = await widgetManager.getOrCreateWidget(VSXExtensionsWidget.ID, { id });
                 viewContainer.addWidget(widget, {
                     initiallyCollapsed: id === VSXExtensionsSourceOptions.BUILT_IN
@@ -91,9 +102,7 @@ export default new ContainerModule(bind => {
     bindViewContribution(bind, VSXExtensionsContribution);
     bind(FrontendApplicationContribution).toService(VSXExtensionsContribution);
     bind(ColorContribution).toService(VSXExtensionsContribution);
-    bind(TabBarToolbarContribution).toService(VSXExtensionsContribution);
 
-    bind(VSXApiVersionProviderImpl).toSelf().inSingletonScope();
-    bind(FrontendApplicationContribution).toService(VSXApiVersionProviderImpl);
-    bind(VSXApiVersionProvider).toService(VSXApiVersionProviderImpl);
+    bindExtensionPreferences(bind);
+    bindPreferenceProviderOverrides(bind, unbind);
 });

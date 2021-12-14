@@ -18,7 +18,7 @@ import { shell } from '../../shared/electron';
 import { injectable, inject } from 'inversify';
 import { ElectronMainWindowService } from '../electron-common/electron-main-window-service';
 import { ElectronMainApplication } from './electron-main-application';
-import { NewWindowOptions } from '../browser/window/window-service';
+import { NewWindowOptions } from '../common/window';
 
 @injectable()
 export class ElectronMainWindowServiceImpl implements ElectronMainWindowService {
@@ -35,6 +35,10 @@ export class ElectronMainWindowServiceImpl implements ElectronMainWindowService 
             });
         }
         return undefined;
+    }
+
+    openNewDefaultWindow(): void {
+        this.app.openDefaultWindow();
     }
 
 }

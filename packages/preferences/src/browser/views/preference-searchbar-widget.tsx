@@ -14,11 +14,12 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { ReactWidget, StatefulWidget } from '@theia/core/lib/browser';
+import { codicon, ReactWidget, StatefulWidget } from '@theia/core/lib/browser';
 import { injectable, postConstruct } from '@theia/core/shared/inversify';
 import * as React from '@theia/core/shared/react';
 import debounce = require('@theia/core/shared/lodash.debounce');
 import { Disposable, Emitter } from '@theia/core';
+import { nls } from '@theia/core/lib/common/nls';
 
 export interface PreferencesSearchbarState {
     searchTerm: string;
@@ -85,7 +86,14 @@ export class PreferencesSearchbarWidget extends ReactWidget implements StatefulW
      * Renders a badge displaying search results count.
      */
     protected renderResultsCountOption(): React.ReactNode {
-        const resultsFound = `${this.resultsCount === 0 ? 'No' : this.resultsCount} ${this.resultsCount === 1 ? 'Setting Found' : 'Settings Found'}`;
+        let resultsFound: string;
+        if (this.resultsCount === 0) {
+            resultsFound = nls.localizeByDefault('No Settings Found');
+        } else if (this.resultsCount === 1) {
+            resultsFound = nls.localizeByDefault('1 Setting Found');
+        } else {
+            resultsFound = nls.localizeByDefault('{0} Settings Found', this.resultsCount.toFixed(0));
+        }
         return this.searchTermExists() ?
             (<span
                 className="results-found"
@@ -100,8 +108,8 @@ export class PreferencesSearchbarWidget extends ReactWidget implements StatefulW
      */
     protected renderClearAllOption(): React.ReactNode {
         return <span
-            className={`clear-all option ${(this.searchTermExists() ? 'enabled' : '')}`}
-            title="Clear Search Results"
+            className={`${codicon('clear-all')} option ${(this.searchTermExists() ? 'enabled' : '')}`}
+            title={nls.localizeByDefault('Clear Search Results')}
             onClick={this.clearSearchResults}
         />;
     }
@@ -119,7 +127,7 @@ export class PreferencesSearchbarWidget extends ReactWidget implements StatefulW
         return search?.value;
     }
 
-    protected updateSearchTerm(searchTerm: string): void {
+    updateSearchTerm(searchTerm: string): void {
         const search = document.getElementById(PreferencesSearchbarWidget.SEARCHBAR_ID) as HTMLInputElement;
         if (!search) {
             return;
@@ -138,7 +146,7 @@ export class PreferencesSearchbarWidget extends ReactWidget implements StatefulW
                         type="text"
                         id={PreferencesSearchbarWidget.SEARCHBAR_ID}
                         spellCheck={false}
-                        placeholder="Search Settings"
+                        placeholder={nls.localizeByDefault('Search Settings')}
                         className="settings-search-input theia-input"
                         onChange={this.handleSearch}
                         ref={this.searchbarRef}

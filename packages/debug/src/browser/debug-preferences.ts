@@ -14,6 +14,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
+import { nls } from '@theia/core/lib/common/nls';
 import { PreferenceSchema, PreferenceProxy, PreferenceService, createPreferenceProxy, PreferenceContribution } from '@theia/core/lib/browser/preferences';
 import { interfaces } from '@theia/core/shared/inversify';
 
@@ -23,32 +24,47 @@ export const debugPreferencesSchema: PreferenceSchema = {
         'debug.trace': {
             type: 'boolean',
             default: false,
-            description: 'Enable/disable tracing communications with debug adapters'
+            description: nls.localize('theia/debug/toggleTracing', 'Enable/disable tracing communications with debug adapters')
         },
         'debug.debugViewLocation': {
             enum: ['default', 'left', 'right', 'bottom'],
             default: 'default',
-            description: 'Controls the location of the debug view.'
+            description: nls.localize('theia/debug/debugViewLocation', 'Controls the location of the debug view.')
         },
         'debug.openDebug': {
             enum: ['neverOpen', 'openOnSessionStart', 'openOnFirstSessionStart', 'openOnDebugBreak'],
             default: 'openOnSessionStart',
-            description: 'Controls when the debug view should open.'
+            description: nls.localizeByDefault('Controls when the debug view should open.')
         },
         'debug.internalConsoleOptions': {
             enum: ['neverOpen', 'openOnSessionStart', 'openOnFirstSessionStart'],
             default: 'openOnFirstSessionStart',
-            description: 'Controls when the internal debug console should open.'
+            description: nls.localizeByDefault('Controls when the internal debug console should open.')
         },
         'debug.inlineValues': {
             type: 'boolean',
             default: false,
-            description: 'Show variable values inline in editor while debugging.'
+            description: nls.localizeByDefault('Show variable values inline in editor while debugging.')
         },
         'debug.showInStatusBar': {
             enum: ['never', 'always', 'onFirstSessionStart'],
-            description: 'Controls when the debug status bar should be visible.',
+            enumDescriptions: [
+                nls.localizeByDefault('Never show debug in status bar'),
+                nls.localizeByDefault('Always show debug in status bar'),
+                nls.localizeByDefault('Show debug in status bar only after debug was started for the first time')
+            ],
+            description: nls.localizeByDefault('Controls when the debug status bar should be visible.'),
             default: 'onFirstSessionStart'
+        },
+        'debug.confirmOnExit': {
+            description: 'Controls whether to confirm when the window closes if there are active debug sessions.',
+            type: 'string',
+            enum: ['never', 'always'],
+            enumDescriptions: [
+                'Never confirm.',
+                'Always confirm if there are debug sessions.',
+            ],
+            default: 'never'
         }
     }
 };
@@ -60,20 +76,23 @@ export class DebugConfiguration {
     'debug.internalConsoleOptions': 'neverOpen' | 'openOnSessionStart' | 'openOnFirstSessionStart';
     'debug.inlineValues': boolean;
     'debug.showInStatusBar': 'never' | 'always' | 'onFirstSessionStart';
+    'debug.confirmOnExit': 'never' | 'always';
 }
 
+export const DebugPreferenceContribution = Symbol('DebugPreferenceContribution');
 export const DebugPreferences = Symbol('DebugPreferences');
 export type DebugPreferences = PreferenceProxy<DebugConfiguration>;
 
-export function createDebugPreferences(preferences: PreferenceService): DebugPreferences {
-    return createPreferenceProxy(preferences, debugPreferencesSchema);
+export function createDebugPreferences(preferences: PreferenceService, schema: PreferenceSchema = debugPreferencesSchema): DebugPreferences {
+    return createPreferenceProxy(preferences, schema);
 }
 
 export function bindDebugPreferences(bind: interfaces.Bind): void {
     bind(DebugPreferences).toDynamicValue(ctx => {
         const preferences = ctx.container.get<PreferenceService>(PreferenceService);
-        return createDebugPreferences(preferences);
+        const contribution = ctx.container.get<PreferenceContribution>(DebugPreferenceContribution);
+        return createDebugPreferences(preferences, contribution.schema);
     }).inSingletonScope();
-
-    bind(PreferenceContribution).toConstantValue({ schema: debugPreferencesSchema });
+    bind(DebugPreferenceContribution).toConstantValue({ schema: debugPreferencesSchema });
+    bind(PreferenceContribution).toService(DebugPreferenceContribution);
 }

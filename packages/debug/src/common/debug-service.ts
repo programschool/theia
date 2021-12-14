@@ -71,6 +71,12 @@ export interface DebugService extends Disposable {
     provideDebugConfigurations(debugType: string, workspaceFolderUri: string | undefined): Promise<DebugConfiguration[]>;
 
     /**
+     * Provides dynamic debug configurations by a provider debug type
+     * @returns An Array of objects containing the debug type and corresponding dynamic debug configurations array
+     */
+    provideDynamicDebugConfigurations?(): Promise<{ type: string, configurations: DebugConfiguration[] }[]>;
+
+    /**
      * Resolves a [debug configuration](#DebugConfiguration) by filling in missing values
      * or by adding/changing/removing attributes before variable substitution.
      * @param debugConfiguration The [debug configuration](#DebugConfiguration) to resolve.
@@ -109,4 +115,17 @@ export namespace DebugError {
         message: `'${type}' debugger type is not supported.`,
         data: { type }
     }));
+}
+
+/**
+ * A closeable channel to send messages over with error/close handling
+ */
+export interface Channel {
+    send(content: string): void;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onMessage(cb: (data: any) => void): void;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    onError(cb: (reason: any) => void): void;
+    onClose(cb: (code: number, reason: string) => void): void;
+    close(): void;
 }

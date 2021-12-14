@@ -21,10 +21,12 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets/react-widget';
 import { CommandRegistry, isOSX, environment, Path } from '@theia/core/lib/common';
 import { WorkspaceCommands, WorkspaceService } from '@theia/workspace/lib/browser';
 import { KeymapsCommands } from '@theia/keymaps/lib/browser';
-import { CommonCommands, LabelProvider } from '@theia/core/lib/browser';
+import { CommonCommands, LabelProvider, Key, KeyCode, codicon } from '@theia/core/lib/browser';
 import { ApplicationInfo, ApplicationServer } from '@theia/core/lib/common/application-protocol';
 import { FrontendApplicationConfigProvider } from '@theia/core/lib/browser/frontend-application-config-provider';
 import { EnvVariablesServer } from '@theia/core/lib/common/env-variables';
+import { WindowService } from '@theia/core/lib/browser/window/window-service';
+import { nls } from '@theia/core/lib/common/nls';
 
 /**
  * Default implementation of the `GettingStartedWidget`.
@@ -46,7 +48,7 @@ export class GettingStartedWidget extends ReactWidget {
     /**
      * The widget `label` which is used for display purposes.
      */
-    static readonly LABEL = 'Getting Started';
+    static readonly LABEL = nls.localizeByDefault('Getting Started');
 
     /**
      * The `ApplicationInfo` for the application if available.
@@ -88,6 +90,9 @@ export class GettingStartedWidget extends ReactWidget {
 
     @inject(LabelProvider)
     protected readonly labelProvider: LabelProvider;
+
+    @inject(WindowService)
+    protected readonly windowService: WindowService;
 
     @inject(WorkspaceService)
     protected readonly workspaceService: WorkspaceService;
@@ -146,7 +151,7 @@ export class GettingStartedWidget extends ReactWidget {
      */
     protected renderHeader(): React.ReactNode {
         return <div className='gs-header'>
-            <h1>{this.applicationName}<span className='gs-sub-header'> Getting Started</span></h1>
+            <h1>{this.applicationName}<span className='gs-sub-header'>{' ' + GettingStartedWidget.LABEL}</span></h1>
         </div>;
     }
 
@@ -156,12 +161,49 @@ export class GettingStartedWidget extends ReactWidget {
      */
     protected renderOpen(): React.ReactNode {
         const requireSingleOpen = isOSX || !environment.electron.is();
-        const open = requireSingleOpen && <div className='gs-action-container'><a href='#' onClick={this.doOpen}>Open</a></div>;
-        const openFile = !requireSingleOpen && <div className='gs-action-container'><a href='#' onClick={this.doOpenFile}>Open File</a></div>;
-        const openFolder = !requireSingleOpen && <div className='gs-action-container'><a href='#' onClick={this.doOpenFolder}>Open Folder</a></div>;
-        const openWorkspace = <a href='#' onClick={this.doOpenWorkspace}>Open Workspace</a>;
+
+        const open = requireSingleOpen && <div className='gs-action-container'>
+            <a
+                role={'button'}
+                tabIndex={0}
+                onClick={this.doOpen}
+                onKeyDown={this.doOpenEnter}>
+                {nls.localizeByDefault('Open')}
+            </a>
+        </div>;
+
+        const openFile = !requireSingleOpen && <div className='gs-action-container'>
+            <a
+                role={'button'}
+                tabIndex={0}
+                onClick={this.doOpenFile}
+                onKeyDown={this.doOpenFileEnter}>
+                {nls.localizeByDefault('Open File')}
+            </a>
+        </div>;
+
+        const openFolder = !requireSingleOpen && <div className='gs-action-container'>
+            <a
+                role={'button'}
+                tabIndex={0}
+                onClick={this.doOpenFolder}
+                onKeyDown={this.doOpenFolderEnter}>
+                {nls.localizeByDefault('Open Folder')}
+            </a>
+        </div>;
+
+        const openWorkspace = (
+            <a
+                role={'button'}
+                tabIndex={0}
+                onClick={this.doOpenWorkspace}
+                onKeyDown={this.doOpenWorkspaceEnter}>
+                {nls.localizeByDefault('Open Workspace')}
+            </a>
+        );
+
         return <div className='gs-section'>
-            <h3 className='gs-section-header'><i className='fa fa-folder-open'></i>Open</h3>
+            <h3 className='gs-section-header'><i className={codicon('folder-opened')}></i>{nls.localizeByDefault('Open')}</h3>
             {open}
             {openFile}
             {openFolder}
@@ -177,19 +219,33 @@ export class GettingStartedWidget extends ReactWidget {
         const paths = this.buildPaths(items);
         const content = paths.slice(0, this.recentLimit).map((item, index) =>
             <div className='gs-action-container' key={index}>
-                <a href='#' onClick={a => this.open(new URI(items[index]))}>{new URI(items[index]).path.base}</a>
+                <a
+                    role={'button'}
+                    tabIndex={0}
+                    onClick={() => this.open(new URI(items[index]))}
+                    onKeyDown={(e: React.KeyboardEvent) => this.openEnter(e, new URI(items[index]))}>
+                    {new URI(items[index]).path.base}
+                </a>
                 <span className='gs-action-details'>
                     {item}
                 </span>
             </div>
         );
         // If the recently used workspaces list exceeds the limit, display `More...` which triggers the recently used workspaces quick-open menu upon selection.
-        const more = paths.length > this.recentLimit && <div className='gs-action-container'><a href='#' onClick={this.doOpenRecentWorkspace}>More...</a></div>;
+        const more = paths.length > this.recentLimit && <div className='gs-action-container'>
+            <a
+                role={'button'}
+                tabIndex={0}
+                onClick={this.doOpenRecentWorkspace}
+                onKeyDown={this.doOpenRecentWorkspaceEnter}>
+                {nls.localizeByDefault('More...')}
+            </a>
+        </div>;
         return <div className='gs-section'>
             <h3 className='gs-section-header'>
-                <i className='fa fa-clock-o'></i>Recent Workspaces
+                <i className={codicon('history')}></i>{nls.localizeByDefault('Recent')}
             </h3>
-            {items.length > 0 ? content : <p className='gs-no-recent'>No Recent Workspaces</p>}
+            {items.length > 0 ? content : <p className='gs-no-recent'>{nls.localizeByDefault('No Recent Workspaces')}</p>}
             {more}
         </div>;
     }
@@ -201,14 +257,26 @@ export class GettingStartedWidget extends ReactWidget {
     protected renderSettings(): React.ReactNode {
         return <div className='gs-section'>
             <h3 className='gs-section-header'>
-                <i className='fa fa-cog'></i>
-                Settings
+                <i className={codicon('settings-gear')}></i>
+                {nls.localizeByDefault('Settings')}
             </h3>
             <div className='gs-action-container'>
-                <a href='#' onClick={this.doOpenPreferences}>Open Preferences</a>
+                <a
+                    role={'button'}
+                    tabIndex={0}
+                    onClick={this.doOpenPreferences}
+                    onKeyDown={this.doOpenPreferencesEnter}>
+                    {nls.localizeByDefault('Open Settings')}
+                </a>
             </div>
             <div className='gs-action-container'>
-                <a href='#' onClick={this.doOpenKeyboardShortcuts}>Open Keyboard Shortcuts</a>
+                <a
+                    role={'button'}
+                    tabIndex={0}
+                    onClick={this.doOpenKeyboardShortcuts}
+                    onKeyDown={this.doOpenKeyboardShortcutsEnter}>
+                    {nls.localizeByDefault('Open Keyboard Shortcuts')}
+                </a>
             </div>
         </div>;
     }
@@ -219,17 +287,35 @@ export class GettingStartedWidget extends ReactWidget {
     protected renderHelp(): React.ReactNode {
         return <div className='gs-section'>
             <h3 className='gs-section-header'>
-                <i className='fa fa-question-circle'></i>
-                Help
+                <i className={codicon('question')}></i>
+                {nls.localizeByDefault('Help')}
             </h3>
             <div className='gs-action-container'>
-                <a href={this.documentationUrl} target='_blank'>Documentation</a>
+                <a
+                    role={'button'}
+                    tabIndex={0}
+                    onClick={() => this.doOpenExternalLink(this.documentationUrl)}
+                    onKeyDown={(e: React.KeyboardEvent) => this.doOpenExternalLinkEnter(e, this.documentationUrl)}>
+                    {nls.localizeByDefault('Documentation')}
+                </a>
             </div>
             <div className='gs-action-container'>
-                <a href={this.extensionUrl} target='_blank'>Building a New Extension</a>
+                <a
+                    role={'button'}
+                    tabIndex={0}
+                    onClick={() => this.doOpenExternalLink(this.extensionUrl)}
+                    onKeyDown={(e: React.KeyboardEvent) => this.doOpenExternalLinkEnter(e, this.extensionUrl)}>
+                    {nls.localize('theia/getting-started/newExtension', 'Building a New Extension')}
+                </a>
             </div>
             <div className='gs-action-container'>
-                <a href={this.pluginUrl} target='_blank'>Building a New Plugin</a>
+                <a
+                    role={'button'}
+                    tabIndex={0}
+                    onClick={() => this.doOpenExternalLink(this.pluginUrl)}
+                    onKeyDown={(e: React.KeyboardEvent) => this.doOpenExternalLinkEnter(e, this.pluginUrl)}>
+                    {nls.localize('theia/getting-started/newPlugin', 'Building a New Plugin')}
+                </a>
             </div>
         </div>;
     }
@@ -241,7 +327,7 @@ export class GettingStartedWidget extends ReactWidget {
         return <div className='gs-section'>
             <div className='gs-action-container'>
                 <p className='gs-sub-header' >
-                    {this.applicationInfo ? 'Version ' + this.applicationInfo.version : ''}
+                    {this.applicationInfo ? nls.localizeByDefault('Version: {0}', this.applicationInfo.version) : ''}
                 </p>
             </div>
         </div>;
@@ -267,35 +353,97 @@ export class GettingStartedWidget extends ReactWidget {
      * Trigger the open command.
      */
     protected doOpen = () => this.commandRegistry.executeCommand(WorkspaceCommands.OPEN.id);
+    protected doOpenEnter = (e: React.KeyboardEvent) => {
+        if (this.isEnterKey(e)) {
+            this.doOpen();
+        }
+    };
+
     /**
      * Trigger the open file command.
      */
     protected doOpenFile = () => this.commandRegistry.executeCommand(WorkspaceCommands.OPEN_FILE.id);
+    protected doOpenFileEnter = (e: React.KeyboardEvent) => {
+        if (this.isEnterKey(e)) {
+            this.doOpenFile();
+        }
+    };
+
     /**
      * Trigger the open folder command.
      */
     protected doOpenFolder = () => this.commandRegistry.executeCommand(WorkspaceCommands.OPEN_FOLDER.id);
+    protected doOpenFolderEnter = (e: React.KeyboardEvent) => {
+        if (this.isEnterKey(e)) {
+            this.doOpenFolder();
+        }
+    };
+
     /**
      * Trigger the open workspace command.
      */
     protected doOpenWorkspace = () => this.commandRegistry.executeCommand(WorkspaceCommands.OPEN_WORKSPACE.id);
+    protected doOpenWorkspaceEnter = (e: React.KeyboardEvent) => {
+        if (this.isEnterKey(e)) {
+            this.doOpenWorkspace();
+        }
+    };
+
     /**
      * Trigger the open recent workspace command.
      */
     protected doOpenRecentWorkspace = () => this.commandRegistry.executeCommand(WorkspaceCommands.OPEN_RECENT_WORKSPACE.id);
+    protected doOpenRecentWorkspaceEnter = (e: React.KeyboardEvent) => {
+        if (this.isEnterKey(e)) {
+            this.doOpenRecentWorkspace();
+        }
+    };
+
     /**
      * Trigger the open preferences command.
      * Used to open the preferences widget.
      */
     protected doOpenPreferences = () => this.commandRegistry.executeCommand(CommonCommands.OPEN_PREFERENCES.id);
+    protected doOpenPreferencesEnter = (e: React.KeyboardEvent) => {
+        if (this.isEnterKey(e)) {
+            this.doOpenPreferences();
+        }
+    };
+
     /**
      * Trigger the open keyboard shortcuts command.
      * Used to open the keyboard shortcuts widget.
      */
     protected doOpenKeyboardShortcuts = () => this.commandRegistry.executeCommand(KeymapsCommands.OPEN_KEYMAPS.id);
+    protected doOpenKeyboardShortcutsEnter = (e: React.KeyboardEvent) => {
+        if (this.isEnterKey(e)) {
+            this.doOpenKeyboardShortcuts();
+        }
+    };
+
     /**
      * Open a workspace given its uri.
      * @param uri {URI} the workspace uri.
      */
     protected open = (uri: URI) => this.workspaceService.open(uri);
+    protected openEnter = (e: React.KeyboardEvent, uri: URI) => {
+        if (this.isEnterKey(e)) {
+            this.open(uri);
+        }
+    };
+
+    /**
+     * Open a link in an external window.
+     * @param url the link.
+     */
+    protected doOpenExternalLink = (url: string) => this.windowService.openNewWindow(url, { external: true });
+    protected doOpenExternalLinkEnter = (e: React.KeyboardEvent, url: string) => {
+        if (this.isEnterKey(e)) {
+            this.doOpenExternalLink(url);
+        }
+    };
+
+    protected isEnterKey(e: React.KeyboardEvent): boolean {
+        return Key.ENTER.keyCode === KeyCode.createKeyCode(e.nativeEvent).key?.keyCode;
+    }
 }

@@ -14,18 +14,17 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import { Position, Location } from '@theia/core/shared/vscode-languageserver-types';
 import { CommandContribution, CommandRegistry, CommandHandler } from '@theia/core/lib/common/command';
-import { CommonCommands } from '@theia/core/lib/browser';
-import { QuickOpenService } from '@theia/core/lib/browser/quick-open/quick-open-service';
-import { QuickOpenItem, QuickOpenMode } from '@theia/core/lib/browser/quick-open/quick-open-model';
-import { EditorCommands } from '@theia/editor/lib/browser';
+import { CommonCommands, QuickInputService, ApplicationShell } from '@theia/core/lib/browser';
+import { EditorCommands, EditorManager, EditorWidget } from '@theia/editor/lib/browser';
 import { MonacoEditor } from './monaco-editor';
 import { MonacoCommandRegistry, MonacoEditorCommandHandler } from './monaco-command-registry';
 import { MonacoEditorService } from './monaco-editor-service';
 import { MonacoTextModelService } from './monaco-text-model-service';
 import { ProtocolToMonacoConverter } from './protocol-to-monaco-converter';
+import { nls } from '@theia/core/lib/common/nls';
 
 export namespace MonacoCommands {
 
@@ -59,8 +58,8 @@ export class MonacoEditorCommandHandlers implements CommandContribution {
     @inject(ProtocolToMonacoConverter)
     protected readonly p2m: ProtocolToMonacoConverter;
 
-    @inject(QuickOpenService)
-    protected readonly quickOpenService: QuickOpenService;
+    @inject(QuickInputService) @optional()
+    protected readonly quickInputService: QuickInputService;
 
     @inject(MonacoEditorService)
     protected readonly codeEditorService: MonacoEditorService;
@@ -70,6 +69,12 @@ export class MonacoEditorCommandHandlers implements CommandContribution {
 
     @inject(monaco.contextKeyService.ContextKeyService)
     protected readonly contextKeyService: monaco.contextKeyService.ContextKeyService;
+
+    @inject(ApplicationShell)
+    protected readonly shell: ApplicationShell;
+
+    @inject(EditorManager)
+    protected editorManager: EditorManager;
 
     registerCommands(): void {
         this.registerMonacoCommands();
@@ -161,9 +166,7 @@ export class MonacoEditorCommandHandlers implements CommandContribution {
                 },
                 isEnabled: () => {
                     const editor = codeEditorService.getFocusedCodeEditor() || codeEditorService.getActiveCodeEditor();
-                    if (!editor) {
-                        return false;
-                    }
+
                     if (editorActions.has(id)) {
                         const action = editor && editor.getAction(id);
                         return !!action && action.isSupported();
@@ -189,6 +192,8 @@ export class MonacoEditorCommandHandlers implements CommandContribution {
         this.monacoCommandRegistry.registerHandler(EditorCommands.CONFIG_EOL.id, this.newConfigEolHandler());
         this.monacoCommandRegistry.registerHandler(EditorCommands.INDENT_USING_SPACES.id, this.newConfigTabSizeHandler(true));
         this.monacoCommandRegistry.registerHandler(EditorCommands.INDENT_USING_TABS.id, this.newConfigTabSizeHandler(false));
+        this.monacoCommandRegistry.registerHandler(EditorCommands.REVERT_EDITOR.id, this.newRevertActiveEditorHandler());
+        this.monacoCommandRegistry.registerHandler(EditorCommands.REVERT_AND_CLOSE.id, this.newRevertAndCloseActiveEditorHandler());
     }
 
     protected newShowReferenceHandler(): MonacoEditorCommandHandler {
@@ -210,21 +215,11 @@ export class MonacoEditorCommandHandlers implements CommandContribution {
         };
     }
     protected configureIndentation(editor: MonacoEditor): void {
-        const options = [true, false].map(useSpaces =>
-            new QuickOpenItem({
-                label: `Indent Using ${useSpaces ? 'Spaces' : 'Tabs'}`,
-                run: (mode: QuickOpenMode) => {
-                    if (mode === QuickOpenMode.OPEN) {
-                        this.configureTabSize(editor, useSpaces);
-                    }
-                    return false;
-                }
-            })
-        );
-        this.quickOpenService.open({ onType: (_, acceptor) => acceptor(options) }, {
-            placeholder: 'Select Action',
-            fuzzyMatchLabel: true
-        });
+        const items = [true, false].map(useSpaces => ({
+            label: nls.localize(`vscode/indentation/indentUsing${useSpaces ? 'Spaces' : 'Tabs'}`, `Indent Using ${useSpaces ? 'Spaces' : 'Tabs'}`),
+            execute: () => this.configureTabSize(editor, useSpaces)
+        }));
+        this.quickInputService?.showQuickPick(items, { placeholder: nls.localizeByDefault('Select Action') });
     }
 
     protected newConfigEolHandler(): MonacoEditorCommandHandler {
@@ -234,22 +229,13 @@ export class MonacoEditorCommandHandlers implements CommandContribution {
     }
 
     protected configureEol(editor: MonacoEditor): void {
-        const options = ['LF', 'CRLF'].map(lineEnding =>
-            new QuickOpenItem({
-                label: lineEnding,
-                run: (mode: QuickOpenMode) => {
-                    if (mode === QuickOpenMode.OPEN) {
-                        this.setEol(editor, lineEnding);
-                        return true;
-                    }
-                    return false;
-                }
-            })
+        const items = ['LF', 'CRLF'].map(lineEnding =>
+        ({
+            label: lineEnding,
+            execute: () => this.setEol(editor, lineEnding)
+        })
         );
-        this.quickOpenService.open({ onType: (_, acceptor) => acceptor(options) }, {
-            placeholder: 'Select End of Line Sequence',
-            fuzzyMatchLabel: true
-        });
+        this.quickInputService?.showQuickPick(items, { placeholder: nls.localizeByDefault('Select End of Line Sequence') });
     }
 
     protected setEol(editor: MonacoEditor, lineEnding: string): void {
@@ -274,31 +260,50 @@ export class MonacoEditorCommandHandlers implements CommandContribution {
             const { tabSize } = model.getOptions();
             const sizes = Array.from(Array(8), (_, x) => x + 1);
             const tabSizeOptions = sizes.map(size =>
-                new QuickOpenItem({
-                    label: size === tabSize ? `${size}   Configured Tab Size` : size.toString(),
-                    run: (mode: QuickOpenMode) => {
-                        if (mode !== QuickOpenMode.OPEN) {
-                            return false;
-                        }
-                        model.updateOptions({
-                            tabSize: size || tabSize,
-                            insertSpaces: useSpaces
-                        });
-                        return true;
-                    }
+            ({
+                label: size === tabSize ? size + '   ' + nls.localizeByDefault('Configured Tab Size') : size.toString(),
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                execute: () => model.updateOptions({
+                    tabSize: size || tabSize,
+                    insertSpaces: useSpaces
                 })
+            })
             );
-            this.quickOpenService.open({ onType: (_, acceptor) => acceptor(tabSizeOptions) }, {
-                placeholder: 'Select Tab Size for Current File',
-                fuzzyMatchLabel: true,
-                selectIndex: lookFor => {
-                    if (!lookFor || lookFor === '') {
-                        return tabSize - 1;
-                    }
-                    return 0;
-                }
-            });
+            this.quickInputService?.showQuickPick(tabSizeOptions, { placeholder: nls.localizeByDefault('Select Tab Size for Current File') });
         }
     }
 
+    protected newRevertActiveEditorHandler(): MonacoEditorCommandHandler {
+        return {
+            execute: () => this.revertEditor(this.getActiveEditor().editor),
+        };
+    }
+
+    protected newRevertAndCloseActiveEditorHandler(): MonacoEditorCommandHandler {
+        return {
+            execute: async () => this.revertAndCloseActiveEditor(this.getActiveEditor())
+        };
+    }
+
+    protected getActiveEditor(): { widget?: EditorWidget, editor?: MonacoEditor } {
+        const widget = this.editorManager.currentEditor;
+        return { widget, editor: widget && MonacoEditor.getCurrent(this.editorManager) };
+    }
+
+    protected async revertEditor(editor?: MonacoEditor): Promise<void> {
+        if (editor) {
+            return editor.document.revert();
+        }
+    }
+
+    protected async revertAndCloseActiveEditor(current: { widget?: EditorWidget, editor?: MonacoEditor }): Promise<void> {
+        if (current.editor && current.widget) {
+            try {
+                await this.revertEditor(current.editor);
+                current.widget.close();
+            } catch (error) {
+                await this.shell.closeWidget(current.widget.id, { save: false });
+            }
+        }
+    }
 }

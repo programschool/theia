@@ -15,8 +15,7 @@
  ********************************************************************************/
 
 import { injectable, multiInject } from '@theia/core/shared/inversify';
-import { PluginPackage, PluginScanner, PluginMetadata } from '../../common/plugin-protocol';
-
+import { PluginPackage, PluginScanner, PluginMetadata, PLUGIN_HOST_BACKEND } from '../../common/plugin-protocol';
 @injectable()
 export class MetadataScanner {
     private scanners: Map<string, PluginScanner> = new Map();
@@ -32,7 +31,7 @@ export class MetadataScanner {
     getPluginMetadata(plugin: PluginPackage): PluginMetadata {
         const scanner = this.getScanner(plugin);
         return {
-            host: 'main',
+            host: PLUGIN_HOST_BACKEND,
             model: scanner.getModel(plugin),
             lifecycle: scanner.getLifecycle(plugin)
         };
@@ -41,24 +40,23 @@ export class MetadataScanner {
     /**
      * Returns the first suitable scanner.
      *
+     * Throws if no scanner was found.
+     *
      * @param {PluginPackage} plugin
      * @returns {PluginScanner}
      */
     getScanner(plugin: PluginPackage): PluginScanner {
-        let scanner;
+        let scanner: PluginScanner | undefined;
         if (plugin && plugin.engines) {
             const scanners = Object.keys(plugin.engines)
-                .filter((engineName: string) => this.scanners.has(engineName))
-                .map((engineName: string) => this.scanners.get(engineName));
-
+                .filter(engineName => this.scanners.has(engineName))
+                .map(engineName => this.scanners.get(engineName)!);
             // get the first suitable scanner from the list
             scanner = scanners[0];
         }
-
         if (!scanner) {
             throw new Error('There is no suitable scanner found for ' + plugin.name);
         }
-
         return scanner;
     }
 }

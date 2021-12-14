@@ -15,20 +15,22 @@
  ********************************************************************************/
 
 import { injectable, interfaces, postConstruct, inject } from '@theia/core/shared/inversify';
+import { TreeNode } from '@theia/core/lib/browser';
 import { SourceTreeWidget } from '@theia/core/lib/browser/source-tree';
 import { VSXExtensionsSource, VSXExtensionsSourceOptions } from './vsx-extensions-source';
+import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
 export class VSXExtensionsWidgetOptions extends VSXExtensionsSourceOptions {
+    title?: string;
 }
+
+export const generateExtensionWidgetId = (widgetId: string): string => VSXExtensionsWidget.ID + ':' + widgetId;
 
 @injectable()
 export class VSXExtensionsWidget extends SourceTreeWidget {
 
     static ID = 'vsx-extensions';
-    static INSTALLED_ID = VSXExtensionsWidget.ID + ':' + VSXExtensionsSourceOptions.INSTALLED;
-    static SEARCH_RESULT_ID = VSXExtensionsWidget.ID + ':' + VSXExtensionsSourceOptions.SEARCH_RESULT;
-    static BUILT_IN_ID = VSXExtensionsWidget.ID + ':' + VSXExtensionsSourceOptions.BUILT_IN;
 
     static createWidget(parent: interfaces.Container, options: VSXExtensionsWidgetOptions): VSXExtensionsWidget {
         const child = SourceTreeWidget.createContainer(parent, {
@@ -54,8 +56,8 @@ export class VSXExtensionsWidget extends SourceTreeWidget {
         super.init();
         this.addClass('theia-vsx-extensions');
 
-        this.id = VSXExtensionsWidget.ID + ':' + this.options.id;
-        const title = this.computeTitle();
+        this.id = generateExtensionWidgetId(this.options.id);
+        const title = this.options.title ?? this.computeTitle();
         this.title.label = title;
         this.title.caption = title;
 
@@ -64,13 +66,26 @@ export class VSXExtensionsWidget extends SourceTreeWidget {
     }
 
     protected computeTitle(): string {
-        if (this.id === VSXExtensionsWidget.INSTALLED_ID) {
-            return 'Installed';
+        switch (this.options.id) {
+            case VSXExtensionsSourceOptions.INSTALLED:
+                return nls.localizeByDefault('Installed');
+            case VSXExtensionsSourceOptions.BUILT_IN:
+                return nls.localizeByDefault('Built-in');
+            case VSXExtensionsSourceOptions.RECOMMENDED:
+                return nls.localizeByDefault('Recommended');
+            case VSXExtensionsSourceOptions.SEARCH_RESULT:
+                return nls.localize('theia/vsx-registry/openVSX', 'Open VSX Registry');
+            default:
+                return '';
         }
-        if (this.id === VSXExtensionsWidget.BUILT_IN_ID) {
-            return 'Built-in';
-        }
-        return 'Open VSX Registry';
     }
 
+    protected handleClickEvent(node: TreeNode | undefined, event: React.MouseEvent<HTMLElement>): void {
+        super.handleClickEvent(node, event);
+        this.model.openNode(node); // Open the editor view on a single click.
+    }
+
+    protected handleDblClickEvent(): void {
+        // Don't open the editor view on a double click.
+    }
 }

@@ -43,7 +43,7 @@ export class WorkspaceCliContribution implements CliContribution {
         if (!wsPath) {
             wsPath = args['root-dir'] as string;
             if (!wsPath) {
-                this.workspaceRoot.resolve();
+                this.workspaceRoot.resolve(undefined);
                 return;
             }
         }
@@ -92,20 +92,20 @@ export class DefaultWorkspaceServer implements WorkspaceServer {
 
     async setMostRecentlyUsedWorkspace(uri: string): Promise<void> {
         this.root = new Deferred();
-        const listUri: string[] = [];
-        const oldListUri = await this.getRecentWorkspaces();
-        listUri.push(uri);
-        if (oldListUri) {
-            oldListUri.forEach(element => {
-                if (element !== uri && element.length > 0) {
-                    listUri.push(element);
-                }
+        this.root.resolve(uri);
+        const recentRoots = Array.from(new Set([uri, ...await this.getRecentWorkspaces()]));
+        this.writeToUserHome({ recentRoots });
+    }
+
+    async removeRecentWorkspace(uri: string): Promise<void> {
+        const recentRoots = await this.getRecentWorkspaces();
+        const index = recentRoots.indexOf(uri);
+        if (index !== -1) {
+            recentRoots.splice(index, 1);
+            this.writeToUserHome({
+                recentRoots
             });
         }
-        this.root.resolve(uri);
-        this.writeToUserHome({
-            recentRoots: listUri
-        });
     }
 
     async getRecentWorkspaces(): Promise<string[]> {

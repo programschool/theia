@@ -16,15 +16,18 @@
 
 import { inject, injectable, named } from '@theia/core/shared/inversify';
 import { ILogger } from '@theia/core/lib/common/logger';
+import { EnvironmentUtils } from '@theia/core/lib/node/environment-utils';
 import { IShellTerminalServerOptions } from '../common/shell-terminal-protocol';
-import { BaseTerminalServer } from '../node/base-terminal-server';
-import { ShellProcessFactory } from '../node/shell-process';
+import { BaseTerminalServer } from './base-terminal-server';
+import { ShellProcessFactory } from './shell-process';
 import { ProcessManager } from '@theia/process/lib/node';
 import { isWindows } from '@theia/core/lib/common/os';
 import * as cp from 'child_process';
 
 @injectable()
 export class ShellTerminalServer extends BaseTerminalServer {
+
+    @inject(EnvironmentUtils) protected environmentUtils: EnvironmentUtils;
 
     constructor(
         @inject(ShellProcessFactory) protected readonly shellFactory: ShellProcessFactory,
@@ -33,16 +36,16 @@ export class ShellTerminalServer extends BaseTerminalServer {
         super(processManager, logger);
     }
 
-    create(options: IShellTerminalServerOptions): Promise<number> {
+    async create(options: IShellTerminalServerOptions): Promise<number> {
         try {
-            options.env = options.env ? options.env : {};
+            options.env = this.environmentUtils.mergeProcessEnv(options.env);
             this.mergedCollection.applyToProcessEnvironment(options.env);
             const term = this.shellFactory(options);
             this.postCreate(term);
-            return Promise.resolve(term.id);
+            return term.id;
         } catch (error) {
             this.logger.error('Error while creating terminal', error);
-            return Promise.resolve(-1);
+            return -1;
         }
     }
 

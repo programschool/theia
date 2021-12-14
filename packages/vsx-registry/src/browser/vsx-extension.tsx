@@ -14,7 +14,9 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
+import * as markdownit from 'markdown-it';
 import * as React from '@theia/core/shared/react';
+import * as DOMPurify from '@theia/core/shared/dompurify';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import URI from '@theia/core/lib/common/uri';
 import { TreeElement } from '@theia/core/lib/browser/source-tree';
@@ -26,7 +28,15 @@ import { ProgressService } from '@theia/core/lib/common/progress-service';
 import { Endpoint } from '@theia/core/lib/browser/endpoint';
 import { VSXEnvironment } from '../common/vsx-environment';
 import { VSXExtensionsSearchModel } from './vsx-extensions-search-model';
-import { VSXExtensionNamespaceAccess, VSXUser } from '../common/vsx-registry-types';
+import { MenuPath } from '@theia/core/lib/common';
+import { codicon, ContextMenuRenderer, TooltipService } from '@theia/core/lib/browser';
+import { VSXExtensionNamespaceAccess, VSXUser } from '@theia/ovsx-client/lib/ovsx-types';
+
+export const EXTENSIONS_CONTEXT_MENU: MenuPath = ['extensions_context_menu'];
+
+export namespace VSXExtensionsContextMenu {
+    export const COPY = [...EXTENSIONS_CONTEXT_MENU, '1_copy'];
+}
 
 @injectable()
 export class VSXExtensionData {
@@ -38,6 +48,7 @@ export class VSXExtensionData {
     readonly description?: string;
     readonly averageRating?: number;
     readonly downloadCount?: number;
+    readonly downloadUrl?: string;
     readonly readmeUrl?: string;
     readonly licenseUrl?: string;
     readonly repository?: string;
@@ -55,6 +66,7 @@ export class VSXExtensionData {
         'description',
         'averageRating',
         'downloadCount',
+        'downloadUrl',
         'readmeUrl',
         'licenseUrl',
         'repository',
@@ -92,11 +104,17 @@ export class VSXExtension implements VSXExtensionData, TreeElement {
     @inject(ProgressService)
     protected readonly progressService: ProgressService;
 
+    @inject(ContextMenuRenderer)
+    protected readonly contextMenuRenderer: ContextMenuRenderer;
+
     @inject(VSXEnvironment)
     readonly environment: VSXEnvironment;
 
     @inject(VSXExtensionsSearchModel)
     readonly search: VSXExtensionsSearchModel;
+
+    @inject(TooltipService)
+    readonly tooltipService: TooltipService;
 
     protected readonly data: Partial<VSXExtensionData> = {};
 
@@ -169,7 +187,14 @@ export class VSXExtension implements VSXExtensionData, TreeElement {
     }
 
     get version(): string | undefined {
-        return this.getData('version');
+        let version = this.getData('version');
+
+        // Ensure version begins with a 'v'
+        if (version && !version.startsWith('v')) {
+            version = `v${version}`;
+        }
+
+        return version;
     }
 
     get averageRating(): number | undefined {
@@ -178,6 +203,10 @@ export class VSXExtension implements VSXExtensionData, TreeElement {
 
     get downloadCount(): number | undefined {
         return this.getData('downloadCount');
+    }
+
+    get downloadUrl(): string | undefined {
+        return this.getData('downloadUrl');
     }
 
     get readmeUrl(): string | undefined {
@@ -226,6 +255,28 @@ export class VSXExtension implements VSXExtensionData, TreeElement {
         return this.getData('publishedBy');
     }
 
+    get tooltipId(): string {
+        return this.tooltipService.tooltipId;
+    }
+
+    get tooltip(): string {
+        let md = `__${this.displayName}__ ${this.version}\n\n${this.description}\n_____\n\nPublisher: ${this.publisher}`;
+
+        if (this.license) {
+            md += `  \rLicense: ${this.license}`;
+        }
+
+        if (this.downloadCount) {
+            md += `  \rDownload count: ${downloadCompactFormatter.format(this.downloadCount)}`;
+        }
+
+        if (this.averageRating) {
+            md += `  \rAverage Rating: ${this.averageRating.toFixed(1)}`;
+        }
+
+        return markdownit().render(md);
+    }
+
     protected _busy = 0;
     get busy(): boolean {
         return !!this._busy;
@@ -253,6 +304,42 @@ export class VSXExtension implements VSXExtensionData, TreeElement {
         }
     }
 
+    handleContextMenu(e: React.MouseEvent<HTMLElement, MouseEvent>): void {
+        e.preventDefault();
+        this.contextMenuRenderer.render({
+            menuPath: EXTENSIONS_CONTEXT_MENU,
+            anchor: {
+                x: e.clientX,
+                y: e.clientY,
+            },
+            args: [this]
+        });
+    }
+
+    /**
+     * Get the registry link for the given extension.
+     * @param path the url path.
+     * @returns the registry link for the given extension at the path.
+     */
+    async getRegistryLink(path = ''): Promise<URI> {
+        const uri = new URI(await this.environment.getRegistryUri());
+        return uri.resolve('extension/' + this.id.replace('.', '/')).resolve(path);
+    }
+
+    async serialize(): Promise<string> {
+        const serializedExtension: string[] = [];
+        serializedExtension.push(`Name: ${this.displayName}`);
+        serializedExtension.push(`Id: ${this.id}`);
+        serializedExtension.push(`Description: ${this.description}`);
+        serializedExtension.push(`Version: ${this.version}`);
+        serializedExtension.push(`Publisher: ${this.publisher}`);
+        if (this.downloadUrl !== undefined) {
+            const registryLink = await this.getRegistryLink();
+            serializedExtension.push(`Open VSX Link: ${registryLink.toString()}`);
+        };
+        return serializedExtension.join('\n');
+    }
+
     async open(options: OpenerOptions = { mode: 'reveal' }): Promise<void> {
         await this.doOpen(this.uri, options);
     }
@@ -262,13 +349,16 @@ export class VSXExtension implements VSXExtensionData, TreeElement {
     }
 
     render(): React.ReactNode {
-        return <VSXExtensionComponent extension={this} />;
+        const node = <VSXExtensionComponent extension={this} />;
+        this.tooltipService.update();
+        return node;
     }
 }
 
 export abstract class AbstractVSXExtensionComponent extends React.Component<AbstractVSXExtensionComponent.Props> {
 
-    readonly install = async () => {
+    readonly install = async (event?: React.MouseEvent) => {
+        event?.stopPropagation();
         this.forceUpdate();
         try {
             const pending = this.props.extension.install();
@@ -279,7 +369,8 @@ export abstract class AbstractVSXExtensionComponent extends React.Component<Abst
         }
     };
 
-    readonly uninstall = async () => {
+    readonly uninstall = async (event?: React.MouseEvent) => {
+        event?.stopPropagation();
         try {
             const pending = this.props.extension.uninstall();
             this.forceUpdate();
@@ -289,11 +380,16 @@ export abstract class AbstractVSXExtensionComponent extends React.Component<Abst
         }
     };
 
+    protected readonly manage = (e: React.MouseEvent<HTMLElement, MouseEvent>) => {
+        e.stopPropagation();
+        this.props.extension.handleContextMenu(e);
+    };
+
     protected renderAction(): React.ReactNode {
         const extension = this.props.extension;
         const { builtin, busy, installed } = extension;
         if (builtin) {
-            return undefined;
+            return <div className="codicon codicon-settings-gear action" onClick={this.manage}></div>;
         }
         if (busy) {
             if (installed) {
@@ -302,7 +398,8 @@ export abstract class AbstractVSXExtensionComponent extends React.Component<Abst
             return <button className="theia-button action prominent theia-mod-disabled">Installing</button>;
         }
         if (installed) {
-            return <button className="theia-button action" onClick={this.uninstall}>Uninstall</button>;
+            return <div><button className="theia-button action" onClick={this.uninstall}>Uninstall</button>
+                <div className="codicon codicon-settings-gear action" onClick={this.manage}></div></div>;
         }
         return <button className="theia-button prominent action" onClick={this.install}>Install</button>;
     }
@@ -320,8 +417,9 @@ const downloadCompactFormatter = new Intl.NumberFormat(undefined, { notation: 'c
 
 export class VSXExtensionComponent extends AbstractVSXExtensionComponent {
     render(): React.ReactNode {
-        const { iconUrl, publisher, displayName, description, version, downloadCount, averageRating } = this.props.extension;
-        return <div className='theia-vsx-extension'>
+        const { iconUrl, publisher, displayName, description, version, downloadCount, averageRating, tooltipId, tooltip } = this.props.extension;
+
+        return <div className='theia-vsx-extension noselect' data-for={tooltipId} data-tip={tooltip}>
             {iconUrl ?
                 <img className='theia-vsx-extension-icon' src={iconUrl} /> :
                 <div className='theia-vsx-extension-icon placeholder' />}
@@ -331,8 +429,8 @@ export class VSXExtensionComponent extends AbstractVSXExtensionComponent {
                         <span className='name'>{displayName}</span> <span className='version'>{version}</span>
                     </div>
                     <div className='stat'>
-                        {!!downloadCount && <span className='download-count'><i className='fa fa-download' />{downloadCompactFormatter.format(downloadCount)}</span>}
-                        {!!averageRating && <span className='average-rating'><i className='fa fa-star' />{averageRating.toFixed(1)}</span>}
+                        {!!downloadCount && <span className='download-count'><i className={codicon('cloud-download')} />{downloadCompactFormatter.format(downloadCount)}</span>}
+                        {!!averageRating && <span className='average-rating'><i className={codicon('star-full')} />{averageRating.toFixed(1)}</span>}
                     </div>
                 </div>
                 <div className='noWrapInfo theia-vsx-extension-description'>{description}</div>
@@ -361,6 +459,7 @@ export class VSXExtensionEditorComponent extends AbstractVSXExtensionComponent {
         } = this.props.extension;
 
         const { baseStyle, scrollStyle } = this.getSubcomponentStyles();
+        const sanitizedReadme = !!readme ? DOMPurify.sanitize(readme) : undefined;
 
         return <React.Fragment>
             <div className='header' style={baseStyle} ref={ref => this.header = (ref || undefined)}>
@@ -380,7 +479,7 @@ export class VSXExtensionEditorComponent extends AbstractVSXExtensionComponent {
                             {publisher}
                         </span>
                         {!!downloadCount && <span className='download-count' onClick={this.openExtension}>
-                            <i className="fa fa-download" />{downloadFormatter.format(downloadCount)}</span>}
+                            <i className={codicon('cloud-download')} />{downloadFormatter.format(downloadCount)}</span>}
                         {averageRating !== undefined && <span className='average-rating' onClick={this.openAverageRating}>{this.renderStars()}</span>}
                         {repository && <span className='repository' onClick={this.openRepository}>Repository</span>}
                         {license && <span className='license' onClick={this.openLicense}>{license}</span>}
@@ -391,7 +490,7 @@ export class VSXExtensionEditorComponent extends AbstractVSXExtensionComponent {
                 </div>
             </div>
             {
-                readme &&
+                sanitizedReadme &&
                 < div className='scroll-container'
                     style={scrollStyle}
                     ref={ref => this._scrollContainer = (ref || undefined)}>
@@ -399,7 +498,8 @@ export class VSXExtensionEditorComponent extends AbstractVSXExtensionComponent {
                         ref={ref => this.body = (ref || undefined)}
                         onClick={this.openLink}
                         style={baseStyle}
-                        dangerouslySetInnerHTML={{ __html: readme }}
+                        // eslint-disable-next-line react/no-danger
+                        dangerouslySetInnerHTML={{ __html: sanitizedReadme }}
                     />
                 </div>
             }
@@ -420,17 +520,17 @@ export class VSXExtensionEditorComponent extends AbstractVSXExtensionComponent {
             icon = 'shield';
             tooltip = `Only verified owners can publish to "${publisher}" namespace.` + tooltip;
         }
-        return <i className={`fa fa-${icon} namespace-access`} title={tooltip} onClick={this.openPublishedBy} />;
+        return <i className={`${codicon(icon)} namespace-access`} title={tooltip} onClick={this.openPublishedBy} />;
     }
 
     protected renderStars(): React.ReactNode {
         const rating = this.props.extension.averageRating || 0;
 
         const renderStarAt = (position: number) => position <= rating ?
-            <i className='fa fa-star' /> :
+            <i className={codicon('star-full')} /> :
             position > rating && position - rating < 1 ?
-                <i className='fa fa-star-half-o' /> :
-                <i className='fa fa-star-o' />;
+                <i className={codicon('star-half')} /> :
+                <i className={codicon('star-empty')} />;
         return <React.Fragment>
             {renderStarAt(1)}{renderStarAt(2)}{renderStarAt(3)}{renderStarAt(4)}{renderStarAt(5)}
         </React.Fragment>;
@@ -475,8 +575,8 @@ export class VSXExtensionEditorComponent extends AbstractVSXExtensionComponent {
         e.preventDefault();
 
         const extension = this.props.extension;
-        const uri = await extension.environment.getRegistryUri();
-        extension.doOpen(uri.resolve('extension/' + extension.id.replace('.', '/')));
+        const uri = await extension.getRegistryLink();
+        extension.doOpen(uri);
     };
     readonly searchPublisher = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -502,8 +602,8 @@ export class VSXExtensionEditorComponent extends AbstractVSXExtensionComponent {
         e.preventDefault();
 
         const extension = this.props.extension;
-        const uri = await extension.environment.getRegistryUri();
-        extension.doOpen(uri.resolve('extension/' + extension.id.replace('.', '/') + '/reviews'));
+        const uri = await extension.getRegistryLink('reviews');
+        extension.doOpen(uri);
     };
     readonly openRepository = (e: React.MouseEvent) => {
         e.stopPropagation();
@@ -524,5 +624,4 @@ export class VSXExtensionEditorComponent extends AbstractVSXExtensionComponent {
             extension.doOpen(new URI(licenseUrl));
         }
     };
-
 }

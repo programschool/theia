@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
+import { inject, injectable, optional, postConstruct } from '@theia/core/shared/inversify';
 import {
     CommandContribution,
     Command,
@@ -27,14 +27,13 @@ import {
     Emitter,
     Event
 } from '@theia/core/lib/common';
-import { QuickPickService } from '@theia/core/lib/common/quick-pick-service';
 import {
-    ApplicationShell, KeybindingContribution, KeyCode, Key,
-    KeybindingRegistry, Widget, LabelProvider, WidgetOpenerOptions, StorageService
+    ApplicationShell, KeybindingContribution, KeyCode, Key, WidgetManager,
+    KeybindingRegistry, Widget, LabelProvider, WidgetOpenerOptions, StorageService,
+    QuickInputService, codicon, CommonCommands, FrontendApplicationContribution, OnWillStopAction, Dialog, ConfirmDialog
 } from '@theia/core/lib/browser';
 import { TabBarToolbarContribution, TabBarToolbarRegistry } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
-import { WidgetManager } from '@theia/core/lib/browser';
-import { TERMINAL_WIDGET_FACTORY_ID, TerminalWidgetFactoryOptions } from './terminal-widget-impl';
+import { TERMINAL_WIDGET_FACTORY_ID, TerminalWidgetFactoryOptions, TerminalWidgetImpl } from './terminal-widget-impl';
 import { TerminalKeybindingContexts } from './terminal-keybinding-contexts';
 import { TerminalService } from './base/terminal-service';
 import { TerminalWidgetOptions, TerminalWidget } from './base/terminal-widget';
@@ -54,6 +53,8 @@ import {
     ENVIRONMENT_VARIABLE_COLLECTIONS_KEY,
     SerializableExtensionEnvironmentVariableCollection
 } from '../common/base-terminal-protocol';
+import { nls } from '@theia/core/lib/common/nls';
+import { TerminalPreferences } from './terminal-preferences';
 
 export namespace TerminalMenus {
     export const TERMINAL = [...MAIN_MENU_BAR, '7_terminal'];
@@ -62,84 +63,86 @@ export namespace TerminalMenus {
     export const TERMINAL_TASKS_INFO = [...TERMINAL_TASKS, '3_terminal'];
     export const TERMINAL_TASKS_CONFIG = [...TERMINAL_TASKS, '4_terminal'];
     export const TERMINAL_NAVIGATOR_CONTEXT_MENU = ['navigator-context-menu', 'navigation'];
+    export const TERMINAL_OPEN_EDITORS_CONTEXT_MENU = ['open-editors-context-menu', 'navigation'];
 }
 
 export namespace TerminalCommands {
     const TERMINAL_CATEGORY = 'Terminal';
-    export const NEW: Command = {
+    export const NEW = Command.toDefaultLocalizedCommand({
         id: 'terminal:new',
         category: TERMINAL_CATEGORY,
-        label: 'Open New Terminal'
-    };
-    export const NEW_ACTIVE_WORKSPACE: Command = {
+        label: 'Create New Integrated Terminal'
+    });
+    export const NEW_ACTIVE_WORKSPACE = Command.toDefaultLocalizedCommand({
         id: 'terminal:new:active:workspace',
         category: TERMINAL_CATEGORY,
-        label: 'Open New Terminal (In Active Workspace)'
-    };
-    export const TERMINAL_CLEAR: Command = {
+        label: 'Create New Integrated Terminal (In Active Workspace)'
+    });
+    export const TERMINAL_CLEAR = Command.toDefaultLocalizedCommand({
         id: 'terminal:clear',
         category: TERMINAL_CATEGORY,
-        label: 'Clear Terminal'
-    };
-    export const TERMINAL_CONTEXT: Command = {
+        label: 'Clear'
+    });
+    export const TERMINAL_CONTEXT = Command.toDefaultLocalizedCommand({
         id: 'terminal:context',
         category: TERMINAL_CATEGORY,
         label: 'Open in Terminal'
-    };
-    export const SPLIT: Command = {
+    });
+    export const SPLIT = Command.toDefaultLocalizedCommand({
         id: 'terminal:split',
         category: TERMINAL_CATEGORY,
         label: 'Split Terminal'
-    };
-    export const TERMINAL_FIND_TEXT: Command = {
+    });
+    export const TERMINAL_FIND_TEXT = Command.toDefaultLocalizedCommand({
         id: 'terminal:find',
         category: TERMINAL_CATEGORY,
         label: 'Find'
-    };
-    export const TERMINAL_FIND_TEXT_CANCEL: Command = {
+    });
+    export const TERMINAL_FIND_TEXT_CANCEL = Command.toDefaultLocalizedCommand({
         id: 'terminal:find:cancel',
         category: TERMINAL_CATEGORY,
-        label: 'Hide find widget'
-    };
+        label: 'Hide Find'
+    });
 
-    export const SCROLL_LINE_UP: Command = {
+    export const SCROLL_LINE_UP = Command.toDefaultLocalizedCommand({
         id: 'terminal:scroll:line:up',
         category: TERMINAL_CATEGORY,
-        label: 'Scroll line up'
-    };
-    export const SCROLL_LINE_DOWN: Command = {
+        label: 'Scroll Up (Line)'
+    });
+    export const SCROLL_LINE_DOWN = Command.toDefaultLocalizedCommand({
         id: 'terminal:scroll:line:down',
         category: TERMINAL_CATEGORY,
-        label: 'Scroll line down'
-    };
-    export const SCROLL_TO_TOP: Command = {
+        label: 'Scroll Down (Line)'
+    });
+    export const SCROLL_TO_TOP = Command.toDefaultLocalizedCommand({
         id: 'terminal:scroll:top',
         category: TERMINAL_CATEGORY,
-        label: 'Scroll to top'
-    };
-    export const SCROLL_PAGE_UP: Command = {
+        label: 'Scroll to Top'
+    });
+    export const SCROLL_PAGE_UP = Command.toDefaultLocalizedCommand({
         id: 'terminal:scroll:page:up',
         category: TERMINAL_CATEGORY,
-        label: 'Scroll page up'
-    };
-    export const SCROLL_PAGE_DOWN: Command = {
+        label: 'Scroll Up (Page)'
+    });
+    export const SCROLL_PAGE_DOWN = Command.toDefaultLocalizedCommand({
         id: 'terminal:scroll:page:down',
         category: TERMINAL_CATEGORY,
-        label: 'Scroll page down'
-    };
+        label: 'Scroll Down (Page)'
+    });
 
     /**
      * Command that displays all terminals that are currently opened
      */
-    export const SHOW_ALL_OPENED_TERMINALS: Command = {
+    export const SHOW_ALL_OPENED_TERMINALS = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.showAllTerminals',
-        category: 'View',
+        category: CommonCommands.VIEW_CATEGORY,
         label: 'Show All Opened Terminals'
-    };
+    });
 }
 
 @injectable()
-export class TerminalFrontendContribution implements TerminalService, CommandContribution, MenuContribution, KeybindingContribution, TabBarToolbarContribution, ColorContribution {
+export class TerminalFrontendContribution implements FrontendApplicationContribution, TerminalService, CommandContribution, MenuContribution,
+    KeybindingContribution, TabBarToolbarContribution, ColorContribution {
 
     @inject(ApplicationShell) protected readonly shell: ApplicationShell;
     @inject(ShellTerminalServerProxy) protected readonly shellTerminalServer: ShellTerminalServerProxy;
@@ -150,16 +153,20 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
     @inject(LabelProvider)
     protected readonly labelProvider: LabelProvider;
 
-    @inject(QuickPickService)
-    protected readonly quickPick: QuickPickService;
+    @inject(QuickInputService) @optional()
+    protected readonly quickInputService: QuickInputService;
 
     @inject(WorkspaceService)
     protected readonly workspaceService: WorkspaceService;
 
     @inject(TerminalWatcher)
     protected readonly terminalWatcher: TerminalWatcher;
+
     @inject(StorageService)
     protected readonly storageService: StorageService;
+
+    @inject(TerminalPreferences)
+    protected terminalPreferences: TerminalPreferences;
 
     protected readonly onDidCreateTerminalEmitter = new Emitter<TerminalWidget>();
     readonly onDidCreateTerminal: Event<TerminalWidget> = this.onDidCreateTerminalEmitter.event;
@@ -172,7 +179,7 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
 
     @postConstruct()
     protected init(): void {
-        this.shell.currentChanged.connect(() => this.updateCurrentTerminal());
+        this.shell.onDidChangeCurrentWidget(() => this.updateCurrentTerminal());
         this.widgetManager.onDidCreateWidget(({ widget }) => {
             if (widget instanceof TerminalWidget) {
                 this.updateCurrentTerminal();
@@ -184,7 +191,7 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
         const terminalFocusKey = this.contextKeyService.createKey<boolean>('terminalFocus', false);
         const updateFocusKey = () => terminalFocusKey.set(this.shell.activeWidget instanceof TerminalWidget);
         updateFocusKey();
-        this.shell.activeChanged.connect(updateFocusKey);
+        this.shell.onDidChangeActiveWidget(updateFocusKey);
 
         this.terminalWatcher.onStoreTerminalEnvVariablesRequested(data => {
             this.storageService.setData(ENVIRONMENT_VARIABLE_COLLECTIONS_KEY, data);
@@ -197,6 +204,40 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
                 }
             });
         });
+    }
+
+    onWillStop(): OnWillStopAction | undefined {
+        const preferenceValue = this.terminalPreferences['terminal.integrated.confirmOnExit'];
+        if (preferenceValue !== 'never') {
+            const allTerminals = this.widgetManager.getWidgets(TERMINAL_WIDGET_FACTORY_ID) as TerminalWidget[];
+            if (allTerminals.length) {
+                return {
+                    action: async () => {
+                        if (preferenceValue === 'always') {
+                            return this.confirmExitWithActiveTerminals(allTerminals.length);
+                        } else {
+                            const activeTerminals = await Promise.all(allTerminals.map(widget => widget.hasChildProcesses()))
+                                .then(hasChildProcesses => hasChildProcesses.filter(hasChild => hasChild));
+                            return activeTerminals.length === 0 || this.confirmExitWithActiveTerminals(activeTerminals.length);
+                        }
+                    },
+                    reason: 'Active integrated terminal',
+                };
+            }
+        }
+    }
+
+    protected async confirmExitWithActiveTerminals(activeTerminalCount: number): Promise<boolean> {
+        const msg = activeTerminalCount === 1
+            ? nls.localize('theia/terminal/terminateActive', 'Do you want to terminate the active terminal session?')
+            : nls.localize('theia/terminal/terminateActiveMultiple', 'Do you want to terminate the {0} active terminal sessions?', activeTerminalCount);
+        const safeToExit = await new ConfirmDialog({
+            title: '',
+            msg,
+            ok: nls.localize('theia/terminal/terminate', 'Terminate'),
+            cancel: Dialog.CANCEL,
+        }).open();
+        return safeToExit === true;
     }
 
     protected _currentTerminal: TerminalWidget | undefined;
@@ -298,17 +339,14 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
             isEnabled: widget => !!this.getTerminalRef(widget),
             isVisible: widget => !!this.getTerminalRef(widget)
         });
-
         commands.registerCommand(TerminalCommands.TERMINAL_CLEAR);
         commands.registerHandler(TerminalCommands.TERMINAL_CLEAR.id, {
             isEnabled: () => this.shell.activeWidget instanceof TerminalWidget,
             execute: () => (this.shell.activeWidget as TerminalWidget).clearOutput()
         });
-
         commands.registerCommand(TerminalCommands.TERMINAL_CONTEXT, UriAwareCommandHandler.MonoSelect(this.selectionService, {
             execute: uri => this.openInTerminal(uri)
         }));
-
         commands.registerCommand(TerminalCommands.TERMINAL_FIND_TEXT);
         commands.registerHandler(TerminalCommands.TERMINAL_FIND_TEXT.id, {
             isEnabled: () => {
@@ -337,7 +375,6 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
                 terminalSearchBox.hide();
             }
         });
-
         commands.registerCommand(TerminalCommands.SCROLL_LINE_UP, {
             isEnabled: () => this.shell.activeWidget instanceof TerminalWidget,
             isVisible: () => false,
@@ -390,14 +427,14 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
         // Open terminal
         const termWidget = await this.newTerminal({ cwd });
         termWidget.start();
-        this.activateTerminal(termWidget);
+        this.open(termWidget);
     }
 
     registerMenus(menus: MenuModelRegistry): void {
-        menus.registerSubmenu(TerminalMenus.TERMINAL, 'Terminal');
+        menus.registerSubmenu(TerminalMenus.TERMINAL, TerminalWidgetImpl.LABEL);
         menus.registerMenuAction(TerminalMenus.TERMINAL_NEW, {
             commandId: TerminalCommands.NEW.id,
-            label: 'New Terminal',
+            label: nls.localizeByDefault('New Terminal'),
             order: '0'
         });
         menus.registerMenuAction(TerminalMenus.TERMINAL_NEW, {
@@ -408,13 +445,17 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
             commandId: TerminalCommands.TERMINAL_CONTEXT.id,
             order: 'z'
         });
+        menus.registerMenuAction(TerminalMenus.TERMINAL_OPEN_EDITORS_CONTEXT_MENU, {
+            commandId: TerminalCommands.TERMINAL_CONTEXT.id,
+            order: 'z'
+        });
     }
 
     registerToolbarItems(toolbar: TabBarToolbarRegistry): void {
         toolbar.registerItem({
             id: TerminalCommands.SPLIT.id,
             command: TerminalCommands.SPLIT.id,
-            text: '$(columns)',
+            icon: codicon('split-horizontal'),
             tooltip: TerminalCommands.SPLIT.label
         });
     }
@@ -422,7 +463,6 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
     registerKeybindings(keybindings: KeybindingRegistry): void {
         /* Register passthrough keybindings for combinations recognized by
            xterm.js and converted to control characters.
-
              See: https://github.com/xtermjs/xterm.js/blob/v3/src/Terminal.ts#L1684 */
 
         /* Register ctrl + k (the passed Key) as a passthrough command in the
@@ -562,10 +602,6 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
         return widget;
     }
 
-    activateTerminal(widget: TerminalWidget, widgetOptions?: ApplicationShell.WidgetOptions): void {
-        this.open(widget, { widgetOptions });
-    }
-
     // TODO: reuse WidgetOpenHandler.open
     open(widget: TerminalWidget, options?: WidgetOpenerOptions): void {
         const op: WidgetOpenerOptions = {
@@ -587,10 +623,24 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
     }
 
     protected async selectTerminalCwd(): Promise<string | undefined> {
-        const roots = this.workspaceService.tryGetRoots();
-        return this.quickPick.show(roots.map(
-            ({ resource }) => ({ label: this.labelProvider.getName(resource), description: this.labelProvider.getLongName(resource), value: resource.toString() })
-        ), { placeholder: 'Select current working directory for new terminal' });
+        return new Promise(async resolve => {
+            const roots = this.workspaceService.tryGetRoots();
+            if (roots.length === 0) {
+                resolve(undefined);
+            } else if (roots.length === 1) {
+                resolve(roots[0].resource.toString());
+            } else {
+                const items = roots.map(({ resource }) => ({
+                    label: this.labelProvider.getName(resource),
+                    description: this.labelProvider.getLongName(resource),
+                    resource
+                }));
+                const selectedItem = await this.quickInputService?.showQuickPick(items, {
+                    placeholder: nls.localizeByDefault('Select current working directory for new terminal')
+                });
+                resolve(selectedItem?.resource?.toString());
+            }
+        });
     }
 
     protected async splitTerminal(widget?: Widget): Promise<void> {
@@ -677,5 +727,4 @@ export class TerminalFrontendContribution implements TerminalService, CommandCon
             });
         }
     }
-
 }

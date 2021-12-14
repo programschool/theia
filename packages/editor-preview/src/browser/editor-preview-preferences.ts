@@ -16,13 +16,15 @@
 
 import { interfaces } from '@theia/core/shared/inversify';
 import { createPreferenceProxy, PreferenceProxy, PreferenceService, PreferenceContribution, PreferenceSchema } from '@theia/core/lib/browser';
+import { nls } from '@theia/core/lib/common/nls';
 
 export const EditorPreviewConfigSchema: PreferenceSchema = {
     'type': 'object',
     properties: {
         'editor.enablePreview': {
             type: 'boolean',
-            description: 'Controls whether editors are opened as previews when selected or single-clicked.',
+            // eslint-disable-next-line max-len
+            description: nls.localizeByDefault('Controls whether opened editors show as preview. Preview editors do not keep open and are reused until explicitly set to be kept open (e.g. via double click or editing) and show up with an italic font style.'),
             default: true
         },
     }
@@ -32,17 +34,20 @@ export interface EditorPreviewConfiguration {
     'editor.enablePreview': boolean;
 }
 
+export const EditorPreviewPreferenceContribution = Symbol('EditorPreviewPreferenceContribution');
 export const EditorPreviewPreferences = Symbol('EditorPreviewPreferences');
 export type EditorPreviewPreferences = PreferenceProxy<EditorPreviewConfiguration>;
 
-export function createEditorPreviewPreferences(preferences: PreferenceService): EditorPreviewPreferences {
-    return createPreferenceProxy(preferences, EditorPreviewConfigSchema);
+export function createEditorPreviewPreferences(preferences: PreferenceService, schema: PreferenceSchema = EditorPreviewConfigSchema): EditorPreviewPreferences {
+    return createPreferenceProxy(preferences, schema);
 }
 
 export function bindEditorPreviewPreferences(bind: interfaces.Bind): void {
     bind(EditorPreviewPreferences).toDynamicValue(ctx => {
         const preferences = ctx.container.get<PreferenceService>(PreferenceService);
-        return createEditorPreviewPreferences(preferences);
+        const contribution = ctx.container.get<PreferenceContribution>(EditorPreviewPreferenceContribution);
+        return createEditorPreviewPreferences(preferences, contribution.schema);
     }).inSingletonScope();
-    bind(PreferenceContribution).toConstantValue({ schema: EditorPreviewConfigSchema });
+    bind(EditorPreviewPreferenceContribution).toConstantValue({ schema: EditorPreviewConfigSchema });
+    bind(PreferenceContribution).toService(EditorPreviewPreferenceContribution);
 }

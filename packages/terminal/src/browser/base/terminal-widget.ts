@@ -45,6 +45,9 @@ export abstract class TerminalWidget extends BaseWidget {
 
     abstract readonly dimensions: TerminalDimensions;
 
+    /** The last CWD assigned to the terminal, useful when attempting getCwdURI on a task terminal fails */
+    lastCwd: URI;
+
     /**
      * Start terminal and return terminal id.
      * @param id - terminal id.
@@ -119,6 +122,8 @@ export abstract class TerminalWidget extends BaseWidget {
     abstract hasChildProcesses(): Promise<boolean>;
 
     abstract setTitle(title: string): void;
+
+    abstract waitOnExit(waitOnExit?: boolean | string): void;
 }
 
 /**

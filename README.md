@@ -11,7 +11,7 @@
   [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-curved)](https://github.com/eclipse-theia/theia/labels/help%20wanted)
   [![Discourse status](https://img.shields.io/discourse/status?label=Chat&server=https%3A%2F%2Fcommunity.theia-ide.org%2F)](https://community.theia-ide.org/)
   [![Build Status](https://github.com/eclipse-theia/theia/workflows/Build/badge.svg?branch=master)](https://github.com/eclipse-theia/theia/actions?query=branch%3Amaster+event%3Apush+event%3Aschedule)
-  [![Publish VS Code Built-in Extensions](https://github.com/theia-ide/vscode-builtin-extensions/workflows/publish-vscode-built-in-extensions/badge.svg)](https://github.com/theia-ide/vscode-builtin-extensions/actions)
+  [![Publish VS Code Built-in Extensions](https://github.com/eclipse-theia/vscode-builtin-extensions/actions/workflows/publish-vsx-latest.yml/badge.svg?branch=master)](https://github.com/eclipse-theia/vscode-builtin-extensions/actions/workflows/publish-vsx-latest.yml)
   [![Open questions](https://img.shields.io/badge/Open-questions-blue.svg?style=flat-curved)](https://github.com/eclipse-theia/theia/labels/question)
   [![Open bugs](https://img.shields.io/badge/Open-bugs-red.svg?style=flat-curved)](https://github.com/eclipse-theia/theia/labels/bug)
 
@@ -29,6 +29,7 @@
 
 - [**Website**](#website)
 - [**Scope**](#scope)
+- [**Roadmap**](#roadmap)
 - [**Getting Started**](#getting-started)
 - [**Contributing**](#contributing)
 - [**Feedback**](#feedback)
@@ -45,6 +46,10 @@
 - Provide a highly flexible architecture for adopters
 - Support VS Code Extension protocol
 - Develop under vendor-neutral open-source governance
+
+## Roadmap
+
+See [our roadmap](https://github.com/eclipse-theia/theia/wiki/Eclipse-Theia-Roadmap) for an overview about the current project goals and the upcoming releases.
 
 ## Getting Started
 Here you can find guides and examples for common scenarios:
@@ -64,7 +69,7 @@ Read below to learn how to take part in improving Theia:
 - Find an issue to work on and submit a pull request
   - First time contributing to open source? Pick a [good first issue](https://github.com/eclipse-theia/theia/labels/good%20first%20issue) to get you familiar with GitHub contributing process.
   - First time contributing to Theia? Pick a [beginner friendly issue](https://github.com/eclipse-theia/theia/labels/beginners) to get you familiar with codebase and our contributing process.
-  - Want to become a Committer? Solve an issue showing that you understand Theia objectives and architecture. [Here](https://github.com/eclipse-theia/theia/labels/help%20wanted) is a good list to start.
+  - Want to become a Committer? Solve an issue showing that you understand Theia objectives and architecture. [Here](https://github.com/eclipse-theia/theia/labels/help%20wanted) is a good list to start. Further, have a look at our [roadmap](https://github.com/eclipse-theia/theia/wiki/Roadmap) to align your contributions with the current project goals.
 - Could not find an issue? Look for bugs, typos, and missing features.
 
 ## Feedback
@@ -81,6 +86,7 @@ Read below how to engage with Theia community:
 - Useful Links:
   - [Developing](doc/Developing.md)
   - [Testing](doc/Testing.md)
+  - [Migration Guide](doc/Migration.md)
   - [API Integration Testing](doc/api-testing.md)
   - [Coding Guidelines](https://github.com/eclipse-theia/theia/wiki/Coding-Guidelines)
   - [Code Organization](https://github.com/eclipse-theia/theia/wiki/Code-Organization)

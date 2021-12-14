@@ -22,40 +22,33 @@
 // Some entities copied and modified from https://github.com/Microsoft/vscode-debugadapter-node/blob/master/adapter/src/protocol.ts
 
 import {
-    CommunicationProvider,
-    DebugAdapterSession,
-} from '../common/debug-model';
+    DebugAdapter,
+    DebugAdapterSession
+} from './debug-model';
 import { DebugProtocol } from 'vscode-debugprotocol';
-import { IWebSocket } from '@theia/core/shared/vscode-ws-jsonrpc';
-import { DisposableCollection, Disposable } from '@theia/core/lib/common/disposable';
+import { Channel } from '../common/debug-service';
 
 /**
  * [DebugAdapterSession](#DebugAdapterSession) implementation.
  */
 export class DebugAdapterSessionImpl implements DebugAdapterSession {
 
-    private static TWO_CRLF = '\r\n\r\n';
-    private static CONTENT_LENGTH = 'Content-Length';
-
-    private readonly toDispose = new DisposableCollection();
-    private channel: IWebSocket | undefined;
-    private contentLength: number;
-    private buffer: Buffer;
+    private channel: Channel | undefined;
+    private isClosed: boolean = false;
 
     constructor(
         readonly id: string,
-        protected readonly communicationProvider: CommunicationProvider
+        protected readonly debugAdapter: DebugAdapter
     ) {
-        this.contentLength = -1;
-        this.buffer = Buffer.alloc(0);
-        this.toDispose.pushAll([
-            this.communicationProvider,
-            Disposable.create(() => this.write(JSON.stringify({ seq: -1, type: 'request', command: 'disconnect' }))),
-            Disposable.create(() => this.write(JSON.stringify({ seq: -1, type: 'request', command: 'terminate' })))
-        ]);
+        this.debugAdapter.onMessageReceived((message: string) => this.send(message));
+        this.debugAdapter.onClose(() => this.onDebugAdapterExit());
+        this.debugAdapter.onError(error => this.onDebugAdapterError(error));
+
     }
 
-    async start(channel: IWebSocket): Promise<void> {
+    async start(channel: Channel): Promise<void> {
+
+        console.debug(`starting debug adapter session '${this.id}'`);
         if (this.channel) {
             throw new Error('The session has already been started, id: ' + this.id);
         }
@@ -63,25 +56,19 @@ export class DebugAdapterSessionImpl implements DebugAdapterSession {
         this.channel.onMessage((message: string) => this.write(message));
         this.channel.onClose(() => this.channel = undefined);
 
-        this.communicationProvider.output.on('data', (data: Buffer) => this.handleData(data));
-        this.communicationProvider.output.on('close', () => this.onDebugAdapterExit(1, undefined)); // FIXME pass a proper exit code
-        this.communicationProvider.output.on('error', error => this.onDebugAdapterError(error));
-        this.communicationProvider.input.on('error', error => this.onDebugAdapterError(error));
     }
 
-    protected onDebugAdapterExit(exitCode: number, signal: string | undefined): void {
-        const event: DebugProtocol.ExitedEvent = {
-            type: 'event',
-            event: 'exited',
-            seq: -1,
-            body: {
-                exitCode
-            }
-        };
-        this.send(JSON.stringify(event));
+    protected onDebugAdapterExit(): void {
+        this.isClosed = true;
+        console.debug(`onDebugAdapterExit session: '${this.id}'`);
+        if (this.channel) {
+            this.channel.close();
+            this.channel = undefined;
+        }
     }
 
     protected onDebugAdapterError(error: Error): void {
+        console.debug(`error in debug adapter session: '${this.id}': ${JSON.stringify(error)}`);
         const event: DebugProtocol.Event = {
             type: 'event',
             event: 'error',
@@ -91,49 +78,6 @@ export class DebugAdapterSessionImpl implements DebugAdapterSession {
         this.send(JSON.stringify(event));
     }
 
-    protected handleData(data: Buffer): void {
-        this.buffer = Buffer.concat([this.buffer, data]);
-
-        while (true) {
-            if (this.contentLength >= 0) {
-                if (this.buffer.length >= this.contentLength) {
-                    const message = this.buffer.toString('utf8', 0, this.contentLength);
-                    this.buffer = this.buffer.slice(this.contentLength);
-                    this.contentLength = -1;
-
-                    if (message.length > 0) {
-                        this.send(message);
-                    }
-                    continue; // there may be more complete messages to process
-                }
-            } else {
-                let idx = this.buffer.indexOf(DebugAdapterSessionImpl.CONTENT_LENGTH);
-                if (idx > 0) {
-                    // log unrecognized output
-                    const output = this.buffer.slice(0, idx);
-                    console.log(output.toString('utf-8'));
-
-                    this.buffer = this.buffer.slice(idx);
-                }
-
-                idx = this.buffer.indexOf(DebugAdapterSessionImpl.TWO_CRLF);
-                if (idx !== -1) {
-                    const header = this.buffer.toString('utf8', 0, idx);
-                    const lines = header.split('\r\n');
-                    for (let i = 0; i < lines.length; i++) {
-                        const pair = lines[i].split(/: +/);
-                        if (pair[0] === DebugAdapterSessionImpl.CONTENT_LENGTH) {
-                            this.contentLength = +pair[1];
-                        }
-                    }
-                    this.buffer = this.buffer.slice(idx + DebugAdapterSessionImpl.TWO_CRLF.length);
-                    continue;
-                }
-            }
-            break;
-        }
-    }
-
     protected send(message: string): void {
         if (this.channel) {
             this.channel.send(message);
@@ -141,10 +85,18 @@ export class DebugAdapterSessionImpl implements DebugAdapterSession {
     }
 
     protected write(message: string): void {
-        this.communicationProvider.input.write(`Content-Length: ${Buffer.byteLength(message, 'utf8')}\r\n\r\n${message}`, 'utf8');
+        if (!this.isClosed) {
+            this.debugAdapter.send(message);
+        }
     }
 
     async stop(): Promise<void> {
-        this.toDispose.dispose();
+        console.debug(`stopping debug adapter session: '${this.id}'`);
+
+        if (!this.isClosed) {
+            await this.debugAdapter.stop();
+        }
+        this.channel?.close();
+        this.channel = undefined;
     }
 }

@@ -14,27 +14,37 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { Command } from '@theia/core';
+import { Command, nls } from '@theia/core';
+import { codicon } from '@theia/core/lib/browser';
 
 export namespace NotificationsCommands {
 
     const NOTIFICATIONS_CATEGORY = 'Notifications';
+    const NOTIFICATIONS_CATEGORY_KEY = nls.getDefaultKey(NOTIFICATIONS_CATEGORY);
 
-    export const TOGGLE: Command = {
+    export const TOGGLE = Command.toLocalizedCommand({
         id: 'notifications.commands.toggle',
         category: NOTIFICATIONS_CATEGORY,
-        iconClass: 'fa fa-th-list',
+        iconClass: codicon('list-unordered'),
         label: 'Toggle Notifications'
-    };
+    }, 'theia/messages/toggleNotifications', NOTIFICATIONS_CATEGORY_KEY);
 
-    export const HIDE: Command = {
+    export const SHOW = Command.toDefaultLocalizedCommand({
+        id: 'notifications.commands.show',
+        category: NOTIFICATIONS_CATEGORY,
+        label: 'Show Notifications'
+    });
+
+    export const HIDE = Command.toDefaultLocalizedCommand({
         id: 'notifications.commands.hide',
-    };
+        category: NOTIFICATIONS_CATEGORY,
+        label: 'Hide Notifications'
+    });
 
-    export const CLEAR_ALL: Command = {
+    export const CLEAR_ALL = Command.toDefaultLocalizedCommand({
         id: 'notifications.commands.clearAll',
         category: NOTIFICATIONS_CATEGORY,
-        iconClass: 'fa fa-times-circle',
+        iconClass: codicon('clear-all'),
         label: 'Clear All Notifications'
-    };
+    });
 }

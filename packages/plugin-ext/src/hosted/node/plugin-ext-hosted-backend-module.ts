@@ -33,6 +33,7 @@ import { HostedPluginCliContribution } from './hosted-plugin-cli-contribution';
 import { HostedPluginDeployerHandler } from './hosted-plugin-deployer-handler';
 import { PluginUriFactory } from './scanners/plugin-uri-factory';
 import { FilePluginUriFactory } from './scanners/file-plugin-uri-factory';
+import { HostedPluginLocalizationService } from './hosted-plugin-localization-service';
 
 const commonHostedConnectionModule = ConnectionContainerModule.create(({ bind, bindBackendService }) => {
     bind(HostedPluginProcess).toSelf().inSingletonScope();
@@ -58,11 +59,14 @@ export function bindCommonHostedBackend(bind: interfaces.Bind): void {
     bind(HostedPluginReader).toSelf().inSingletonScope();
     bind(BackendApplicationContribution).toService(HostedPluginReader);
 
+    bind(HostedPluginLocalizationService).toSelf().inSingletonScope();
     bind(HostedPluginDeployerHandler).toSelf().inSingletonScope();
     bind(PluginDeployerHandler).toService(HostedPluginDeployerHandler);
 
     bind(GrammarsReader).toSelf().inSingletonScope();
-    bind(HostedPluginProcessConfiguration).toConstantValue({ path: path.resolve(__dirname, 'plugin-host.js') });
+    bind(HostedPluginProcessConfiguration).toConstantValue({
+        path: path.join(__dirname, 'plugin-host'),
+    });
 
     bind(ConnectionContainerModule).toConstantValue(commonHostedConnectionModule);
     bind(PluginUriFactory).to(FilePluginUriFactory).inSingletonScope();

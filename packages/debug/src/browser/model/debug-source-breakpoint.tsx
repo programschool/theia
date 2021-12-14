@@ -19,7 +19,7 @@ import { DebugProtocol } from 'vscode-debugprotocol/lib/debugProtocol';
 import { RecursivePartial } from '@theia/core';
 import URI from '@theia/core/lib/common/uri';
 import { Range } from '@theia/editor/lib/browser';
-import { WidgetOpenerOptions } from '@theia/core/lib/browser';
+import { TREE_NODE_INFO_CLASS, WidgetOpenerOptions } from '@theia/core/lib/browser';
 import { TreeElement } from '@theia/core/lib/browser/source-tree';
 import { SourceBreakpoint } from '../breakpoint/breakpoint-marker';
 import { DebugSource } from './debug-source';
@@ -50,7 +50,8 @@ export class DebugSourceBreakpoint extends DebugBreakpoint<SourceBreakpoint> imp
         const { uri, raw } = this;
         let shouldUpdate = false;
         let breakpoints = raw && this.doRemove(this.origins.filter(origin => !(origin.raw.line === raw.line && origin.raw.column === raw.column)));
-        if (breakpoints) {
+        // Check for breakpoints array with at least one entry
+        if (breakpoints && breakpoints.length) {
             shouldUpdate = true;
         } else {
             breakpoints = this.breakpoints.getBreakpoints(uri);
@@ -147,7 +148,7 @@ export class DebugSourceBreakpoint extends DebugBreakpoint<SourceBreakpoint> imp
         return <React.Fragment>
             <span className='line-info' title={this.labelProvider.getLongName(this.uri)}>
                 <span className='name'>{this.labelProvider.getName(this.uri)} </span>
-                <span className='path'>{this.labelProvider.getLongName(this.uri.parent)} </span>
+                <span className={'path ' + TREE_NODE_INFO_CLASS}>{this.labelProvider.getLongName(this.uri.parent)} </span>
             </span>
             <span className='line'>{this.renderPosition()}</span>
         </React.Fragment>;

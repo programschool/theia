@@ -26,7 +26,7 @@ import {
     LabelProviderContribution,
     PreferenceSchemaProvider
 } from '@theia/core/lib/browser';
-import { PreferenceSchema, PreferenceSchemaProperties } from '@theia/core/lib/browser/preferences';
+import { PreferenceLanguageOverrideService, PreferenceSchema, PreferenceSchemaProperties } from '@theia/core/lib/browser/preferences';
 import { KeybindingsContributionPointHandler } from './keybindings/keybindings-contribution-handler';
 import { MonacoSnippetSuggestProvider } from '@theia/monaco/lib/browser/monaco-snippet-suggest-provider';
 import { PluginSharedStyle } from './plugin-shared-style';
@@ -60,6 +60,9 @@ export class PluginContributionHandler {
 
     @inject(PreferenceSchemaProvider)
     private readonly preferenceSchemaProvider: PreferenceSchemaProvider;
+
+    @inject(PreferenceLanguageOverrideService)
+    private readonly preferenceOverrideService: PreferenceLanguageOverrideService;
 
     @inject(MonacoTextmateService)
     private readonly monacoTextmateService: MonacoTextmateService;
@@ -296,8 +299,9 @@ export class PluginContributionHandler {
             }
         }
 
-        if (contributions.colors) {
-            pushContribution('colors', () => this.colors.register(...contributions.colors));
+        const colors = contributions.colors;
+        if (colors) {
+            pushContribution('colors', () => this.colors.register(...colors));
         }
 
         if (contributions.taskDefinitions) {
@@ -354,7 +358,7 @@ export class PluginContributionHandler {
             return Disposable.NULL;
         }
         const toDispose = new DisposableCollection();
-        for (const { iconUrl, themeIcon, command, category, title } of contribution.commands) {
+        for (const { iconUrl, themeIcon, command, category, title, originalTitle } of contribution.commands) {
             const reference = iconUrl && this.style.toIconClass(iconUrl);
             const icon = themeIcon && monaco.theme.ThemeIcon.fromString(themeIcon);
             let iconClass;
@@ -364,7 +368,7 @@ export class PluginContributionHandler {
             } else if (icon) {
                 iconClass = monaco.theme.ThemeIcon.asClassName(icon);
             }
-            toDispose.push(this.registerCommand({ id: command, category, label: title, iconClass }));
+            toDispose.push(this.registerCommand({ id: command, category, label: title, originalLabel: originalTitle, iconClass }));
         }
         return toDispose;
     }
@@ -429,7 +433,7 @@ export class PluginContributionHandler {
         // eslint-disable-next-line guard-for-in
         for (const key in configurationDefaults) {
             const defaultValue = configurationDefaults[key];
-            if (this.preferenceSchemaProvider.testOverrideValue(key, defaultValue)) {
+            if (this.preferenceOverrideService.testOverrideValue(key, defaultValue)) {
                 defaultOverrides.properties[key] = {
                     type: 'object',
                     default: defaultValue,

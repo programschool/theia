@@ -21,6 +21,7 @@ import { ReactWidget } from '@theia/core/lib/browser/widgets';
 import { DebugViewModel } from './debug-view-model';
 import { DebugState } from '../debug-session';
 import { DebugAction } from './debug-action';
+import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
 export class DebugToolBar extends ReactWidget {
@@ -58,31 +59,35 @@ export class DebugToolBar extends ReactWidget {
         const { state } = this.model;
         return <React.Fragment>
             {this.renderContinue()}
-            <DebugAction enabled={state === DebugState.Stopped} run={this.stepOver} label='Step Over' iconClass='step-over' ref={this.setStepRef} />
-            <DebugAction enabled={state === DebugState.Stopped} run={this.stepIn} label='Step Into' iconClass='step-into' />
-            <DebugAction enabled={state === DebugState.Stopped} run={this.stepOut} label='Step Out' iconClass='step-out' />
-            <DebugAction enabled={state !== DebugState.Inactive} run={this.restart} label='Restart' iconClass='restart' />
+            <DebugAction enabled={state === DebugState.Stopped} run={this.stepOver} label={nls.localizeByDefault('Step Over')}
+                iconClass='debug-step-over' ref={this.setStepRef} />
+            <DebugAction enabled={state === DebugState.Stopped} run={this.stepIn} label={nls.localizeByDefault('Step Into')}
+                iconClass='debug-step-into' />
+            <DebugAction enabled={state === DebugState.Stopped} run={this.stepOut} label={nls.localizeByDefault('Step Out')}
+                iconClass='debug-step-out' />
+            <DebugAction enabled={state !== DebugState.Inactive} run={this.restart} label={nls.localizeByDefault('Restart')}
+                iconClass='debug-restart' />
             {this.renderStart()}
         </React.Fragment>;
     }
     protected renderStart(): React.ReactNode {
         const { state } = this.model;
         if (state === DebugState.Inactive && this.model.sessionCount === 1) {
-            return <DebugAction run={this.start} label='Start' iconClass='start' />;
+            return <DebugAction run={this.start} label={nls.localizeByDefault('Start')} iconClass='debug-start' />;
         }
-        return <DebugAction enabled={state !== DebugState.Inactive} run={this.stop} label='Stop' iconClass='stop' />;
+        return <DebugAction enabled={state !== DebugState.Inactive} run={this.stop} label={nls.localizeByDefault('Stop')} iconClass='debug-stop' />;
     }
     protected renderContinue(): React.ReactNode {
         const { state } = this.model;
         if (state === DebugState.Stopped) {
-            return <DebugAction run={this.continue} label='Continue' iconClass='continue' />;
+            return <DebugAction run={this.continue} label={nls.localizeByDefault('Continue')} iconClass='debug-continue' />;
         }
-        return <DebugAction enabled={state === DebugState.Running} run={this.pause} label='Pause' iconClass='pause' />;
+        return <DebugAction enabled={state === DebugState.Running} run={this.pause} label={nls.localizeByDefault('Pause')} iconClass='debug-pause' />;
     }
 
     protected start = () => this.model.start();
     protected restart = () => this.model.restart();
-    protected stop = () => this.model.currentSession && this.model.currentSession.terminate();
+    protected stop = () => this.model.terminate();
     protected continue = () => this.model.currentThread && this.model.currentThread.continue();
     protected pause = () => this.model.currentThread && this.model.currentThread.pause();
     protected stepOver = () => this.model.currentThread && this.model.currentThread.stepOver();

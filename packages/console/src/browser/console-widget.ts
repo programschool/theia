@@ -25,6 +25,7 @@ import { MonacoEditorProvider } from '@theia/monaco/lib/browser/monaco-editor-pr
 import { ConsoleHistory } from './console-history';
 import { ConsoleContentWidget } from './console-content-widget';
 import { ConsoleSession } from './console-session';
+import { ConsoleSessionManager } from './console-session-manager';
 
 export const ConsoleOptions = Symbol('ConsoleWidgetOptions');
 export interface ConsoleOptions {
@@ -67,6 +68,9 @@ export class ConsoleWidget extends BaseWidget implements StatefulWidget {
     @inject(ConsoleHistory)
     protected readonly history: ConsoleHistory;
 
+    @inject(ConsoleSessionManager)
+    protected readonly sessionManager: ConsoleSessionManager;
+
     @inject(MonacoEditorProvider)
     protected readonly editorProvider: MonacoEditorProvider;
 
@@ -107,6 +111,11 @@ export class ConsoleWidget extends BaseWidget implements StatefulWidget {
             if (event.hasChanged(monaco.editor.EditorOption.fontInfo)) {
                 this.updateFont();
             }
+        }));
+
+        this.session = this.sessionManager.selectedSession;
+        this.toDispose.push(this.sessionManager.onDidChangeSelectedSession(session => {
+            this.session = session;
         }));
 
         this.updateFont();

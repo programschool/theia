@@ -21,6 +21,7 @@ import { TerminalProcess, TerminalProcessOptions, ProcessManager, MultiRingBuffe
 import { isWindows, isOSX, OS } from '@theia/core/lib/common';
 import URI from '@theia/core/lib/common/uri';
 import { FileUri } from '@theia/core/lib/node/file-uri';
+import { EnvironmentUtils } from '@theia/core/lib/node/environment-utils';
 import { parseArgs } from '@theia/process/lib/node/utils';
 import { IShellTerminalPreferences } from '../common/shell-terminal-protocol';
 
@@ -37,23 +38,6 @@ export interface ShellProcessOptions {
     rows?: number,
     env?: { [key: string]: string | null },
     isPseudo?: boolean,
-}
-
-function setUpEnvVariables(customEnv?: { [key: string]: string | null }): { [key: string]: string } {
-    const processEnv: { [key: string]: string } = {};
-
-    const prEnv: NodeJS.ProcessEnv = process.env;
-    Object.keys(prEnv).forEach((key: string) => {
-        processEnv[key] = prEnv[key] || '';
-    });
-
-    if (customEnv) {
-        for (const envName of Object.keys(customEnv)) {
-            processEnv[envName] = customEnv[envName] || '';
-        }
-    }
-
-    return processEnv;
 }
 
 function getRootPath(rootURI?: string): string {
@@ -75,7 +59,8 @@ export class ShellProcess extends TerminalProcess {
         @inject(ShellProcessOptions) options: ShellProcessOptions,
         @inject(ProcessManager) processManager: ProcessManager,
         @inject(MultiRingBuffer) ringBuffer: MultiRingBuffer,
-        @inject(ILogger) @named('terminal') logger: ILogger
+        @inject(ILogger) @named('terminal') logger: ILogger,
+        @inject(EnvironmentUtils) environmentUtils: EnvironmentUtils,
     ) {
         super(<TerminalProcessOptions>{
             command: options.shell || ShellProcess.getShellExecutablePath(options.shellPreferences),
@@ -85,7 +70,7 @@ export class ShellProcess extends TerminalProcess {
                 cols: options.cols || ShellProcess.defaultCols,
                 rows: options.rows || ShellProcess.defaultRows,
                 cwd: getRootPath(options.rootURI),
-                env: setUpEnvVariables(options.env),
+                env: environmentUtils.mergeProcessEnv(options.env),
             },
             isPseudo: options.isPseudo,
         }, processManager, ringBuffer, logger);

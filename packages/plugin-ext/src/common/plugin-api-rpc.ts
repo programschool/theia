@@ -22,15 +22,14 @@ import { PluginLifecycle, PluginModel, PluginMetadata, PluginPackage, IconUrl, P
 import { QueryParameters } from './env';
 import { TextEditorCursorStyle } from './editor-options';
 import {
+    ConfigurationTarget,
     TextEditorLineNumbersStyle,
     EndOfLine,
     OverviewRulerLane,
     IndentAction,
-    FileOperationOptions,
-    QuickInputButton
+    FileOperationOptions
 } from '../plugin/types-impl';
 import { UriComponents } from './uri-components';
-import { ConfigurationTarget } from '../plugin/types-impl';
 import {
     SerializedDocumentFilter,
     CompletionContext,
@@ -43,6 +42,7 @@ import {
     Hover,
     DocumentHighlight,
     FormattingOptions,
+    ChainedCacheId,
     Definition,
     DocumentLink,
     CodeLensSymbol,
@@ -81,8 +81,6 @@ import { DebuggerDescription } from '@theia/debug/lib/common/debug-service';
 import { DebugProtocol } from 'vscode-debugprotocol';
 import { SymbolInformation } from '@theia/core/shared/vscode-languageserver-types';
 import { ArgumentProcessor } from '../plugin/command-registry';
-import { MaybePromise } from '@theia/core/lib/common/types';
-import { QuickTitleButton } from '@theia/core/lib/common/quick-open-model';
 import * as files from '@theia/filesystem/lib/common/files';
 import { BinaryBuffer } from '@theia/core/lib/common/buffer';
 import { ResourceLabelFormatter } from '@theia/core/lib/common/label-protocol';
@@ -93,8 +91,9 @@ import type {
     TimelineProviderDescriptor
 } from '@theia/timeline/lib/common/timeline-model';
 import { SerializableEnvironmentVariableCollection } from '@theia/terminal/lib/common/base-terminal-protocol';
-import { ThemeType } from '@theia/core/lib/browser/theming';
+import { ThemeType } from '@theia/core/lib/common/theme';
 import { Disposable } from '@theia/core/lib/common/disposable';
+import { PickOptions, QuickInputButtonHandle, QuickPickItem } from '@theia/core/lib/browser';
 
 export interface PreferenceData {
     [scope: number]: any;
@@ -103,6 +102,7 @@ export interface PreferenceData {
 export interface Plugin {
     pluginPath: string | undefined;
     pluginFolder: string;
+    pluginUri: string;
     model: PluginModel;
     rawModel: PluginPackage;
     lifecycle: PluginLifecycle;
@@ -177,6 +177,7 @@ export const emptyPlugin: Plugin = {
     },
     pluginPath: 'empty',
     pluginFolder: 'empty',
+    pluginUri: 'empty',
     rawModel: {
         name: 'emptyPlugin',
         publisher: 'Theia',
@@ -248,7 +249,7 @@ export interface CommandRegistryExt {
 export interface TerminalServiceExt {
     $terminalCreated(id: string, name: string): void;
     $terminalNameChanged(id: string, name: string): void;
-    $terminalOpened(id: string, processId: number, cols: number, rows: number): void;
+    $terminalOpened(id: string, processId: number, terminalId: number, cols: number, rows: number): void;
     $terminalClosed(id: string): void;
     $terminalOnInput(id: string, data: string): void;
     $terminalSizeChanged(id: string, cols: number, rows: number): void;
@@ -264,8 +265,6 @@ export interface ConnectionMain {
     $createConnection(id: string): Promise<void>;
     $deleteConnection(id: string): Promise<void>;
     $sendMessage(id: string, message: string): void;
-    $createConnection(id: string): Promise<void>;
-    $deleteConnection(id: string): Promise<void>;
 }
 
 export interface ConnectionExt {
@@ -283,7 +282,7 @@ export interface TerminalServiceMain {
 
     /**
      * Send text to the terminal by id.
-     * @param id - terminal id.
+     * @param id - terminal widget id.
      * @param text - text content.
      * @param addNewLine - in case true - add new line after the text, otherwise - don't apply new line.
      */
@@ -291,14 +290,14 @@ export interface TerminalServiceMain {
 
     /**
      * Write data to the terminal by id.
-     * @param id - terminal id.
+     * @param id - terminal widget id.
      * @param data - data.
      */
     $write(id: string, data: string): void;
 
     /**
      * Resize the terminal by id.
-     * @param id - terminal id.
+     * @param id - terminal widget id.
      * @param cols - columns.
      * @param rows - rows.
      */
@@ -306,22 +305,65 @@ export interface TerminalServiceMain {
 
     /**
      * Show terminal on the UI panel.
-     * @param id - terminal id.
+     * @param id - terminal widget id.
      * @param preserveFocus - set terminal focus in case true value, and don't set focus otherwise.
      */
     $show(id: string, preserveFocus?: boolean): void;
 
     /**
      * Hide UI panel where is located terminal widget.
-     * @param id - terminal id.
+     * @param id - terminal widget id.
      */
     $hide(id: string): void;
 
     /**
      * Destroy terminal.
-     * @param id - terminal id.
+     * @param id - terminal widget id.
      */
     $dispose(id: string): void;
+
+    /**
+     * Send text to the terminal by id.
+     * @param id - terminal id.
+     * @param text - text content.
+     * @param addNewLine - in case true - add new line after the text, otherwise - don't apply new line.
+     */
+    $sendTextByTerminalId(id: number, text: string, addNewLine?: boolean): void;
+
+    /**
+     * Write data to the terminal by id.
+     * @param id - terminal id.
+     * @param data - data.
+     */
+    $writeByTerminalId(id: number, data: string): void;
+
+    /**
+     * Resize the terminal by id.
+     * @param id - terminal id.
+     * @param cols - columns.
+     * @param rows - rows.
+     */
+    $resizeByTerminalId(id: number, cols: number, rows: number): void;
+
+    /**
+     * Show terminal on the UI panel.
+     * @param id - terminal id.
+     * @param preserveFocus - set terminal focus in case true value, and don't set focus otherwise.
+     */
+    $showByTerminalId(id: number, preserveFocus?: boolean): void;
+
+    /**
+     * Hide UI panel where is located terminal widget.
+     * @param id - terminal id.
+     */
+    $hideByTerminalId(id: number): void;
+
+    /**
+     * Destroy terminal.
+     * @param id - terminal id.
+     * @param waitOnExit - Whether to wait for a key press before closing the terminal.
+     */
+    $disposeByTerminalId(id: number, waitOnExit?: boolean | string): void;
 
     $setEnvironmentVariableCollection(extensionIdentifier: string, persistent: boolean, collection: SerializableEnvironmentVariableCollection | undefined): void;
 }
@@ -331,27 +373,6 @@ export interface AutoFocus {
     // TODO
 }
 
-export interface PickOptions {
-    placeHolder?: string;
-    autoFocus?: AutoFocus;
-    matchOnDescription?: boolean;
-    matchOnDetail?: boolean;
-    ignoreFocusLost?: boolean;
-    quickNavigationConfiguration?: {}; // TODO
-    contextKey?: string;
-    canSelectMany?: boolean;
-}
-
-export interface PickOpenItem {
-    handle: number;
-    label: string;
-    description?: string;
-    detail?: string;
-    picked?: boolean;
-    groupLabel?: string;
-    showBorder?: boolean;
-}
-
 export enum MainMessageType {
     Error,
     Warning,
@@ -359,6 +380,7 @@ export enum MainMessageType {
 }
 
 export interface MainMessageOptions {
+    detail?: string;
     modal?: boolean
     onCloseActionHandle?: number
 }
@@ -385,16 +407,30 @@ export interface StatusBarMessageRegistryMain {
     $dispose(id: string): void;
 }
 
+export type Item = string | theia.QuickPickItem;
+
 export interface QuickOpenExt {
     $onItemSelected(handle: number): void;
-    $validateInput(input: string): PromiseLike<string | undefined> | undefined;
+    $validateInput(input: string): Promise<string | null | undefined> | undefined;
 
-    $acceptOnDidAccept(quickInputNumber: number): Promise<void>;
-    $acceptDidChangeValue(quickInputNumber: number, changedValue: string): Promise<void>;
-    $acceptOnDidHide(quickInputNumber: number): Promise<void>;
-    $acceptOnDidTriggerButton(quickInputNumber: number, btn: QuickTitleButton): Promise<void>;
+    $acceptOnDidAccept(sessionId: number): Promise<void>;
+    $acceptDidChangeValue(sessionId: number, changedValue: string): Promise<void>;
+    $acceptOnDidHide(sessionId: number): Promise<void>;
+    $acceptOnDidTriggerButton(sessionId: number, btn: QuickInputButtonHandle): Promise<void>;
     $onDidChangeActive(sessionId: number, handles: number[]): void;
     $onDidChangeSelection(sessionId: number, handles: number[]): void;
+
+    /* eslint-disable max-len */
+    showQuickPick(itemsOrItemsPromise: Array<QuickPickItem> | Promise<Array<QuickPickItem>>, options: theia.QuickPickOptions & { canPickMany: true; },
+        token?: theia.CancellationToken): Promise<Array<QuickPickItem> | undefined>;
+    showQuickPick(itemsOrItemsPromise: string[] | Promise<string[]>, options?: theia.QuickPickOptions, token?: theia.CancellationToken): Promise<string | undefined>;
+    showQuickPick(itemsOrItemsPromise: Array<QuickPickItem> | Promise<Array<QuickPickItem>>, options?: theia.QuickPickOptions, token?: theia.CancellationToken): Promise<theia.QuickPickItem | undefined>;
+    showQuickPick(itemsOrItemsPromise: Item[] | Promise<Item[]>, options?: theia.QuickPickOptions, token?: theia.CancellationToken): Promise<Item | Item[] | undefined>;
+
+    showInput(options?: theia.InputBoxOptions, token?: theia.CancellationToken): PromiseLike<string | undefined>;
+    // showWorkspaceFolderPick(options?: theia.WorkspaceFolderPickOptions, token?: theia.CancellationToken): Promise<theia.WorkspaceFolder | undefined>
+    createQuickPick<T extends theia.QuickPickItem>(plugin: Plugin): theia.QuickPick<T>;
+    createInputBox(plugin: Plugin): theia.InputBox;
 }
 
 /**
@@ -509,51 +545,69 @@ export interface WorkspaceFolderPickOptionsMain {
     ignoreFocusOut?: boolean;
 }
 
-export interface QuickInputTitleButtonHandle extends QuickTitleButton {
-    index: number; // index of where they are in buttons array if QuickInputButton or -1 if QuickInputButtons.Back
+export interface TransferQuickPickItems extends theia.QuickPickItem {
+    handle: number;
 }
 
-export interface TransferQuickInput {
+export interface TransferQuickInputButton extends theia.QuickInputButton {
+    handle?: number;
+}
+
+export type TransferQuickInput = TransferQuickPick | TransferInputBox;
+
+export interface BaseTransferQuickInput {
+    [key: string]: any;
     id: number;
-    title: string | undefined;
-    step: number | undefined;
-    totalSteps: number | undefined;
-    enabled: boolean;
-    busy: boolean;
-    ignoreFocusOut: boolean;
+    type?: 'quickPick' | 'inputBox';
+    enabled?: boolean;
+    busy?: boolean;
+    visible?: boolean;
 }
 
-export interface TransferInputBox extends TransferQuickInput {
-    value: string;
-    placeholder: string | undefined;
-    password: boolean;
-    buttons: ReadonlyArray<QuickInputButton>;
-    prompt: string | undefined;
-    validationMessage: string | undefined;
-    validateInput(value: string): MaybePromise<string | undefined>;
+export interface TransferQuickPick extends BaseTransferQuickInput {
+    type?: 'quickPick';
+    value?: string;
+    placeholder?: string;
+    buttons?: TransferQuickInputButton[];
+    items?: TransferQuickPickItems[];
+    activeItems?: ReadonlyArray<theia.QuickPickItem>;
+    selectedItems?: ReadonlyArray<theia.QuickPickItem>;
+    canSelectMany?: boolean;
+    ignoreFocusOut?: boolean;
+    matchOnDescription?: boolean;
+    matchOnDetail?: boolean;
+    sortByLabel?: boolean;
 }
 
-export interface TransferQuickPick<T extends theia.QuickPickItem> extends TransferQuickInput {
-    value: string;
-    placeholder: string | undefined;
-    buttons: ReadonlyArray<QuickInputButton>;
-    items: PickOpenItem[];
-    canSelectMany: boolean;
-    matchOnDescription: boolean;
-    matchOnDetail: boolean;
-    activeItems: ReadonlyArray<T>;
-    selectedItems: ReadonlyArray<T>;
+export interface TransferInputBox extends BaseTransferQuickInput {
+    type?: 'inputBox';
+    value?: string;
+    placeholder?: string;
+    password?: boolean;
+    buttons?: TransferQuickInputButton[];
+    prompt?: string;
+    validationMessage?: string;
+}
+
+export interface IInputBoxOptions {
+    value?: string;
+    valueSelection?: [number, number];
+    prompt?: string;
+    placeHolder?: string;
+    password?: boolean;
+    ignoreFocusOut?: boolean;
 }
 
 export interface QuickOpenMain {
-    $show(options: PickOptions, token: CancellationToken): Promise<number | number[]>;
-    $setItems(items: PickOpenItem[]): Promise<any>;
+    $show(instance: number, options: PickOptions<TransferQuickPickItems>, token: CancellationToken): Promise<number | number[] | undefined>;
+    $setItems(instance: number, items: TransferQuickPickItems[]): Promise<any>;
+    $setError(instance: number, error: Error): Promise<void>;
     $input(options: theia.InputBoxOptions, validateInput: boolean, token: CancellationToken): Promise<string | undefined>;
+    $createOrUpdate<T extends theia.QuickPickItem>(params: TransferQuickInput): Promise<void>;
+    $dispose(id: number): Promise<void>;
+
     $hide(): void;
-    $showInputBox(inputBox: TransferInputBox, validateInput: boolean): void;
-    $showCustomQuickPick<T extends theia.QuickPickItem>(inputBox: TransferQuickPick<T>): void;
-    $setQuickInputChanged(changed: object): void;
-    $refreshQuickInput(): void;
+    $showInputBox(options: TransferInputBox, validateInput: boolean): Promise<string | undefined>;
 }
 
 export interface WorkspaceMain {
@@ -611,6 +665,7 @@ export interface TreeViewsMain {
     $reveal(treeViewId: string, elementParentChain: string[], options: TreeViewRevealOptions): Promise<any>;
     $setMessage(treeViewId: string, message: string): void;
     $setTitle(treeViewId: string, title: string): void;
+    $setDescription(treeViewId: string, description: string): void;
 }
 
 export interface TreeViewsExt {
@@ -722,6 +777,14 @@ export interface TimelineCommandArg {
     uri: string;
 }
 
+export interface DecorationRequest {
+    readonly id: number;
+    readonly uri: UriComponents;
+}
+
+export type DecorationData = [boolean, string, string, ThemeColor];
+export interface DecorationReply { [id: number]: DecorationData; }
+
 export namespace CommentsCommandArg {
     export function is(arg: Object | undefined): arg is CommentsCommandArg {
         return !!arg && typeof arg === 'object' && 'commentControlHandle' in arg && 'commentThreadHandle' in arg && 'text' in arg && !('commentUniqueId' in arg);
@@ -757,23 +820,14 @@ export interface CommentsEditCommandArg {
 }
 
 export interface DecorationsExt {
-    registerDecorationProvider(provider: theia.DecorationProvider): theia.Disposable
-    $provideDecoration(id: number, uri: string): Promise<DecorationData | undefined>
+    registerFileDecorationProvider(provider: theia.FileDecorationProvider, pluginInfo: PluginInfo): theia.Disposable
+    $provideDecorations(handle: number, requests: DecorationRequest[], token: CancellationToken): Promise<DecorationReply>;
 }
 
 export interface DecorationsMain {
-    $registerDecorationProvider(id: number, provider: DecorationProvider): Promise<number>;
-    $fireDidChangeDecorations(id: number, arg: undefined | string | string[]): Promise<void>;
-    $dispose(id: number): Promise<void>;
-}
-
-export interface DecorationData {
-    letter?: string;
-    title?: string;
-    color?: ThemeColor;
-    priority?: number;
-    bubble?: boolean;
-    source?: string;
+    $registerDecorationProvider(handle: number): Promise<void>;
+    $unregisterDecorationProvider(handle: number): void;
+    $onDidChange(handle: number, resources: UriComponents[] | null): void;
 }
 
 export interface ScmMain {
@@ -882,10 +936,6 @@ export interface SourceControlResourceDecorations {
      * The icon path for a specific source control resource state.
      */
     readonly iconPath?: string;
-}
-
-export interface DecorationProvider {
-    provideDecoration(uri: string): Promise<DecorationData | undefined>;
 }
 
 export interface NotificationMain {
@@ -1311,6 +1361,8 @@ export interface CommandProperties {
 
 export interface TaskDto {
     type: string;
+    taskType?: 'shell' | 'process' | 'customExecution'; // the task execution type
+    executionId?: string,
     label: string;
     source?: string;
     scope: string | number;
@@ -1319,8 +1371,17 @@ export interface TaskDto {
     problemMatcher?: any;
     group?: string;
     detail?: string;
+    presentation?: TaskPresentationOptionsDTO;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     [key: string]: any;
+}
+
+export interface TaskPresentationOptionsDTO {
+    reveal?: number;
+    focus?: boolean;
+    echo?: boolean;
+    panel?: number;
+    showReuseMessage?: boolean;
 }
 
 export interface TaskExecutionDto {
@@ -1340,7 +1401,7 @@ export interface PluginInfo {
 export interface LanguagesExt {
     $provideCompletionItems(handle: number, resource: UriComponents, position: Position,
         context: CompletionContext, token: CancellationToken): Promise<CompletionResultDto | undefined>;
-    $resolveCompletionItem(handle: number, parentId: number, id: number, token: CancellationToken): Promise<Completion | undefined>;
+    $resolveCompletionItem(handle: number, chainedId: ChainedCacheId, token: CancellationToken): Promise<Completion | undefined>;
     $releaseCompletionItems(handle: number, id: number): void;
     $provideImplementation(handle: number, resource: UriComponents, position: Position, token: CancellationToken): Promise<Definition | undefined>;
     $provideTypeDefinition(handle: number, resource: UriComponents, position: Position, token: CancellationToken): Promise<Definition | undefined>;
@@ -1395,8 +1456,9 @@ export interface LanguagesExt {
     $provideDocumentSemanticTokens(handle: number, resource: UriComponents, previousResultId: number, token: CancellationToken): Promise<BinaryBuffer | null>;
     $releaseDocumentSemanticTokens(handle: number, semanticColoringResultId: number): void;
     $provideDocumentRangeSemanticTokens(handle: number, resource: UriComponents, range: Range, token: CancellationToken): Promise<BinaryBuffer | null>;
-    $provideRootDefinition(handle: number, resource: UriComponents, location: Position, token: CancellationToken): Promise<CallHierarchyDefinition | undefined>;
+    $provideRootDefinition(handle: number, resource: UriComponents, location: Position, token: CancellationToken): Promise<CallHierarchyDefinition | CallHierarchyDefinition[] | undefined>;
     $provideCallers(handle: number, definition: CallHierarchyDefinition, token: CancellationToken): Promise<CallHierarchyReference[] | undefined>;
+    $provideCallees(handle: number, definition: CallHierarchyDefinition, token: CancellationToken): Promise<CallHierarchyReference[] | undefined>;
 }
 
 export const LanguagesMainFactory = Symbol('LanguagesMainFactory');
@@ -1531,13 +1593,33 @@ export interface StorageExt {
     $updatePluginsWorkspaceData(data: KeysToKeysToAnyValue): void;
 }
 
+/**
+ * A DebugConfigurationProviderTriggerKind specifies when the `provideDebugConfigurations` method of a `DebugConfigurationProvider` should be called.
+ * Currently there are two situations:
+ *  (1) providing debug configurations to populate a newly created `launch.json`
+ *  (2) providing dynamically generated configurations when the user asks for them through the UI (e.g. via the "Select and Start Debugging" command).
+ * A trigger kind is used when registering a `DebugConfigurationProvider` with {@link debug.registerDebugConfigurationProvider}.
+ */
+export enum DebugConfigurationProviderTriggerKind {
+    /**
+     * `DebugConfigurationProvider.provideDebugConfigurations` is called to provide the initial debug
+     * configurations for a newly created launch.json.
+     */
+    Initial = 1,
+    /**
+     * `DebugConfigurationProvider.provideDebugConfigurations` is called to provide dynamically generated debug configurations when the user asks for them through the UI
+     * (e.g. via the "Select and Start Debugging" command).
+     */
+    Dynamic = 2
+}
+
 export interface DebugExt {
     $onSessionCustomEvent(sessionId: string, event: string, body?: any): void;
     $breakpointsDidChange(added: Breakpoint[], removed: string[], changed: Breakpoint[]): void;
     $sessionDidCreate(sessionId: string): void;
     $sessionDidDestroy(sessionId: string): void;
     $sessionDidChange(sessionId: string | undefined): void;
-    $provideDebugConfigurations(debugType: string, workspaceFolder: string | undefined): Promise<theia.DebugConfiguration[]>;
+    $provideDebugConfigurations(debugType: string, workspaceFolder: string | undefined, dynamic?: boolean): Promise<theia.DebugConfiguration[]>;
     $resolveDebugConfigurations(debugConfiguration: theia.DebugConfiguration, workspaceFolder: string | undefined): Promise<theia.DebugConfiguration | undefined>;
     $resolveDebugConfigurationWithSubstitutedVariables(debugConfiguration: theia.DebugConfiguration, workspaceFolder: string | undefined):
         Promise<theia.DebugConfiguration | undefined>;
@@ -1553,7 +1635,7 @@ export interface DebugMain {
     $unregisterDebuggerConfiguration(debugType: string): Promise<void>;
     $addBreakpoints(breakpoints: Breakpoint[]): Promise<void>;
     $removeBreakpoints(breakpoints: string[]): Promise<void>;
-    $startDebugging(folder: theia.WorkspaceFolder | undefined, nameOrConfiguration: string | theia.DebugConfiguration): Promise<boolean>;
+    $startDebugging(folder: theia.WorkspaceFolder | undefined, nameOrConfiguration: string | theia.DebugConfiguration, options: theia.DebugSessionOptions): Promise<boolean>;
     $customRequest(sessionId: string, command: string, args?: any): Promise<DebugProtocol.Response>;
 }
 
@@ -1665,6 +1747,7 @@ export const PLUGIN_RPC_CONTEXT = {
     DEBUG_MAIN: createProxyIdentifier<DebugMain>('DebugMain'),
     FILE_SYSTEM_MAIN: createProxyIdentifier<FileSystemMain>('FileSystemMain'),
     SCM_MAIN: createProxyIdentifier<ScmMain>('ScmMain'),
+    SECRETS_MAIN: createProxyIdentifier<SecretsMain>('SecretsMain'),
     DECORATIONS_MAIN: createProxyIdentifier<DecorationsMain>('DecorationsMain'),
     WINDOW_MAIN: createProxyIdentifier<WindowMain>('WindowMain'),
     CLIPBOARD_MAIN: <ProxyIdentifier<ClipboardMain>>createProxyIdentifier<ClipboardMain>('ClipboardMain'),
@@ -1699,6 +1782,7 @@ export const MAIN_RPC_CONTEXT = {
     FILE_SYSTEM_EXT: createProxyIdentifier<FileSystemExt>('FileSystemExt'),
     ExtHostFileSystemEventService: createProxyIdentifier<ExtHostFileSystemEventServiceShape>('ExtHostFileSystemEventService'),
     SCM_EXT: createProxyIdentifier<ScmExt>('ScmExt'),
+    SECRETS_EXT: createProxyIdentifier<SecretsExt>('SecretsExt'),
     DECORATIONS_EXT: createProxyIdentifier<DecorationsExt>('DecorationsExt'),
     LABEL_SERVICE_EXT: createProxyIdentifier<LabelServiceExt>('LabelServiceExt'),
     TIMELINE_EXT: createProxyIdentifier<TimelineExt>('TimeLineExt'),
@@ -1707,9 +1791,10 @@ export const MAIN_RPC_CONTEXT = {
 };
 
 export interface TasksExt {
-    $provideTasks(handle: number, token?: CancellationToken): Promise<TaskDto[] | undefined>;
+    $initLoadedTasks(executions: TaskExecutionDto[]): Promise<void>;
+    $provideTasks(handle: number): Promise<TaskDto[] | undefined>;
     $resolveTask(handle: number, task: TaskDto, token?: CancellationToken): Promise<TaskDto | undefined>;
-    $onDidStartTask(execution: TaskExecutionDto): void;
+    $onDidStartTask(execution: TaskExecutionDto, terminalId: number): void;
     $onDidEndTask(id: number): void;
     $onDidStartTaskProcess(processId: number | undefined, execution: TaskExecutionDto): void;
     $onDidEndTaskProcess(exitCode: number | undefined, taskId: number): void;
@@ -1722,6 +1807,7 @@ export interface TasksMain {
     $taskExecutions(): Promise<TaskExecutionDto[]>;
     $unregister(handle: number): void;
     $terminateTask(id: number): void;
+    $customExecutionComplete(id: number, exitCode: number | undefined): void;
 }
 
 export interface AuthenticationExt {
@@ -1754,4 +1840,14 @@ export interface LabelServiceExt {
 export interface LabelServiceMain {
     $registerResourceLabelFormatter(handle: number, formatter: ResourceLabelFormatter): void;
     $unregisterResourceLabelFormatter(handle: number): void;
+}
+
+export interface SecretsExt {
+    $onDidChangePassword(e: { extensionId: string, key: string }): Promise<void>;
+}
+
+export interface SecretsMain {
+    $getPassword(extensionId: string, key: string): Promise<string | undefined>;
+    $setPassword(extensionId: string, key: string, value: string): Promise<void>;
+    $deletePassword(extensionId: string, key: string): Promise<void>;
 }

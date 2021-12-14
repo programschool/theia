@@ -15,17 +15,14 @@
  ********************************************************************************/
 
 import { Event } from '../../common/event';
-
-export interface NewWindowOptions {
-    readonly external?: boolean;
-}
+import { NewWindowOptions } from '../../common/window';
 
 /**
  * Service for opening new browser windows.
  */
 export const WindowService = Symbol('WindowService');
-export interface WindowService {
 
+export interface WindowService {
     /**
      * Opens a new window and loads the content from the given URL.
      * In a browser, opening a new Theia tab or open a link is the same thing.
@@ -34,11 +31,10 @@ export interface WindowService {
     openNewWindow(url: string, options?: NewWindowOptions): undefined;
 
     /**
-     * Called when the `window` is about to `unload` its resources.
-     * At this point, the `document` is still visible and the [`BeforeUnloadEvent`](https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event)
-     * event will be canceled if the return value of this method is `false`.
+     * Opens a new default window.
+     * - In electron and in the browser it will open the default window without a pre-defined content.
      */
-    canUnload(): boolean;
+    openNewDefaultWindow(): void;
 
     /**
      * Fires when the `window` unloads. The unload event is inevitable. On this event, the frontend application can save its state and release resource.
@@ -46,4 +42,26 @@ export interface WindowService {
      */
     readonly onUnload: Event<void>;
 
+    /**
+     * Checks `FrontendApplicationContribution#willStop` for impediments to shutdown and runs any actions returned.
+     * Can be used safely in browser and Electron when triggering reload or shutdown programmatically.
+     * Should _only_ be called before a shutdown - if this returns `true`, `FrontendApplicationContribution#willStop`
+     * will not be called again in the current session. I.e. if this return `true`, the shutdown should proceed without
+     * further condition.
+     */
+    isSafeToShutDown(): Promise<boolean>;
+
+    /**
+     * Will prevent subsequent checks of `FrontendApplicationContribution#willStop`. Should only be used after requesting
+     * user confirmation.
+     *
+     * This is primarily intended programmatic restarts due to e.g. change of display language. It allows for a single confirmation
+     * of intent, rather than one warning and then several warnings from other contributions.
+     */
+    setSafeToShutDown(): void;
+
+    /**
+     * Reloads the window according to platform.
+     */
+    reload(): void;
 }

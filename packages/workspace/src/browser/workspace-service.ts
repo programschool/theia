@@ -18,6 +18,7 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import URI from '@theia/core/lib/common/uri';
 import { WorkspaceServer, THEIA_EXT, VSCODE_EXT, getTemporaryWorkspaceFileUri } from '../common';
 import { WindowService } from '@theia/core/lib/browser/window/window-service';
+import { DEFAULT_WINDOW_HASH } from '@theia/core/lib/common/window';
 import {
     FrontendApplicationContribution, PreferenceServiceImpl, PreferenceScope, PreferenceSchemaProvider, LabelProvider
 } from '@theia/core/lib/browser';
@@ -40,10 +41,10 @@ import { IJSONSchema } from '@theia/core/lib/common/json-schema';
 @injectable()
 export class WorkspaceService implements FrontendApplicationContribution {
 
-    private _workspace: FileStat | undefined;
+    protected _workspace: FileStat | undefined;
 
-    private _roots: FileStat[] = [];
-    private deferredRoots = new Deferred<FileStat[]>();
+    protected _roots: FileStat[] = [];
+    protected deferredRoots = new Deferred<FileStat[]>();
 
     @inject(FileService)
     protected readonly fileService: FileService;
@@ -83,6 +84,11 @@ export class WorkspaceService implements FrontendApplicationContribution {
 
     protected applicationName: string;
 
+    protected _ready = new Deferred<void>();
+    get ready(): Promise<void> {
+        return this._ready.promise;
+    }
+
     @postConstruct()
     protected async init(): Promise<void> {
         this.applicationName = FrontendApplicationConfigProvider.get().applicationName;
@@ -105,6 +111,7 @@ export class WorkspaceService implements FrontendApplicationContribution {
                 this.refreshRootWatchers();
             }
         });
+        this._ready.resolve();
     }
 
     /**
@@ -122,6 +129,14 @@ export class WorkspaceService implements FrontendApplicationContribution {
     }
 
     protected async doGetDefaultWorkspaceUri(): Promise<string | undefined> {
+
+        // If an empty window is explicitly requested do not restore a previous workspace.
+        // Note: `window.location.hash` includes leading "#" if non-empty.
+        if (window.location.hash === `#${DEFAULT_WINDOW_HASH}`) {
+            window.location.hash = '';
+            return undefined;
+        }
+
         // Prefer the workspace path specified as the URL fragment, if present.
         if (window.location.hash.length > 1) {
             // Remove the leading # and decode the URI.
@@ -155,7 +170,7 @@ export class WorkspaceService implements FrontendApplicationContribution {
      * Set the URL fragment to the given workspace path.
      */
     protected setURLFragment(workspacePath: string): void {
-        window.location.hash = workspacePath;
+        window.location.hash = encodeURI(workspacePath);
     }
 
     get roots(): Promise<FileStat[]> {
@@ -193,12 +208,14 @@ export class WorkspaceService implements FrontendApplicationContribution {
             const uri = this._workspace.resource;
             if (this._workspace.isFile) {
                 this.toDisposeOnWorkspace.push(this.fileService.watch(uri));
+                this.onWorkspaceLocationChangedEmitter.fire(this._workspace);
             }
             this.setURLFragment(uri.path.toString());
         } else {
             this.setURLFragment('');
         }
         this.updateTitle();
+        await this.server.setMostRecentlyUsedWorkspace(this._workspace ? this._workspace.resource.toString() : '');
         await this.updateWorkspace();
     }
 
@@ -301,6 +318,10 @@ export class WorkspaceService implements FrontendApplicationContribution {
         return this.server.getRecentWorkspaces();
     }
 
+    async removeRecentWorkspace(uri: string): Promise<void> {
+        return this.server.removeRecentWorkspace(uri);
+    }
+
     /**
      * Returns `true` if theia has an opened workspace or folder
      * @returns {boolean}
@@ -359,11 +380,12 @@ export class WorkspaceService implements FrontendApplicationContribution {
     }
 
     /**
-     * Adds a root folder to the workspace
-     * @param uri URI of the root folder being added
+     * Adds root folder(s) to the workspace
+     * @param uris URI or URIs of the root folder(s) to add
      */
-    async addRoot(uri: URI): Promise<void> {
-        await this.spliceRoots(this._roots.length, 0, uri);
+    async addRoot(uris: URI[] | URI): Promise<void> {
+        const toAdd = Array.isArray(uris) ? uris : [uris];
+        await this.spliceRoots(this._roots.length, 0, ...toAdd);
     }
 
     /**
@@ -381,6 +403,7 @@ export class WorkspaceService implements FrontendApplicationContribution {
                     workspaceData
                 )
             );
+            await this.updateWorkspace();
         }
     }
 
@@ -409,6 +432,7 @@ export class WorkspaceService implements FrontendApplicationContribution {
         const currentData = await this.getWorkspaceDataFromFile();
         const newData = WorkspaceData.buildWorkspaceData(roots, currentData);
         await this.writeWorkspaceFile(this._workspace, newData);
+        await this.updateWorkspace();
         return toRemove.map(root => new URI(root));
     }
 
@@ -416,7 +440,7 @@ export class WorkspaceService implements FrontendApplicationContribution {
         return getTemporaryWorkspaceFileUri(this.envVariableServer);
     }
 
-    private async writeWorkspaceFile(workspaceFile: FileStat | undefined, workspaceData: WorkspaceData): Promise<FileStat | undefined> {
+    protected async writeWorkspaceFile(workspaceFile: FileStat | undefined, workspaceData: WorkspaceData): Promise<FileStat | undefined> {
         if (workspaceFile) {
             const data = JSON.stringify(WorkspaceData.transformToRelative(workspaceData, workspaceFile));
             const edits = jsoncparser.format(data, undefined, { tabSize: 3, insertSpaces: true, eol: '' });
@@ -496,7 +520,7 @@ export class WorkspaceService implements FrontendApplicationContribution {
 
     protected openNewWindow(workspacePath: string): void {
         const url = new URL(window.location.href);
-        url.hash = workspacePath;
+        url.hash = encodeURI(workspacePath);
         this.windowService.openNewWindow(url.toString());
     }
 

@@ -18,42 +18,32 @@ import { Emitter, Event } from '../common/event';
 import { Disposable } from '../common/disposable';
 import { FrontendApplicationConfigProvider } from './frontend-application-config-provider';
 import { ApplicationProps } from '@theia/application-package/lib/application-props';
+import { Theme, ThemeChangeEvent } from '../common/theme';
+
+/**
+ * @deprecated since 1.20.0. Import from `@theia/core/lib/common/theme` instead.
+ */
+export * from '../common/theme';
 
 export const ThemeServiceSymbol = Symbol('ThemeService');
 
-export type ThemeType = 'light' | 'dark' | 'hc';
-
-export interface Theme {
-    readonly id: string;
-    readonly type: ThemeType;
-    readonly label: string;
-    readonly description?: string;
-    readonly editorTheme?: string;
-    activate(): void;
-    deactivate(): void;
-}
-
-export interface ThemeChangeEvent {
-    readonly newTheme: Theme;
-    readonly oldTheme?: Theme;
-}
-
 export class ThemeService {
 
-    private themes: { [id: string]: Theme } = {};
-    private activeTheme: Theme | undefined;
-    private readonly themeChange = new Emitter<ThemeChangeEvent>();
+    protected themes: { [id: string]: Theme } = {};
+    protected activeTheme: Theme | undefined;
+    protected readonly themeChange = new Emitter<ThemeChangeEvent>();
 
-    readonly onThemeChange: Event<ThemeChangeEvent> = this.themeChange.event;
+    readonly onDidColorThemeChange: Event<ThemeChangeEvent> = this.themeChange.event;
 
     static get(): ThemeService {
         const global = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        return global[ThemeServiceSymbol] || new ThemeService();
-    }
-
-    protected constructor() {
-        const global = window as any; // eslint-disable-line @typescript-eslint/no-explicit-any
-        global[ThemeServiceSymbol] = this;
+        if (!global[ThemeServiceSymbol]) {
+            const themeService = new ThemeService();
+            themeService.register(...BuiltinThemeProvider.themes);
+            themeService.startupTheme();
+            global[ThemeServiceSymbol] = themeService;
+        }
+        return global[ThemeServiceSymbol];
     }
 
     register(...themes: Theme[]): Disposable {

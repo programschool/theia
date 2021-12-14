@@ -16,23 +16,24 @@
 
 import { interfaces } from '@theia/core/shared/inversify';
 import { createPreferenceProxy, PreferenceProxy, PreferenceService, PreferenceContribution, PreferenceSchema } from '@theia/core/lib/browser';
+import { nls } from '@theia/core/lib/common/nls';
 
 export const ProblemConfigSchema: PreferenceSchema = {
     'type': 'object',
     'properties': {
         'problems.decorations.enabled': {
             'type': 'boolean',
-            'description': 'Show problem decorators (diagnostic markers) in tree widgets.',
+            'description': nls.localizeByDefault('Show Errors & Warnings on files and folder.'),
             'default': true,
         },
         'problems.decorations.tabbar.enabled': {
             'type': 'boolean',
-            'description': 'Show problem decorators (diagnostic markers) in the tab bars.',
+            'description': nls.localize('theia/markers/tabbarDecorationsEnabled', 'Show problem decorators (diagnostic markers) in the tab bars.'),
             'default': true
         },
         'problems.autoReveal': {
             'type': 'boolean',
-            'description': 'Controls whether Problems view should reveal markers when file is opened.',
+            'description': nls.localizeByDefault('Controls whether Problems view should automatically reveal files when opening them.'),
             'default': true
         }
     }
@@ -44,16 +45,20 @@ export interface ProblemConfiguration {
     'problems.autoReveal': boolean
 }
 
+export const ProblemPreferenceContribution = Symbol('ProblemPreferenceContribution');
 export const ProblemPreferences = Symbol('ProblemPreferences');
 export type ProblemPreferences = PreferenceProxy<ProblemConfiguration>;
 
-export const createProblemPreferences = (preferences: PreferenceService): ProblemPreferences =>
-    createPreferenceProxy(preferences, ProblemConfigSchema);
+export function createProblemPreferences(preferences: PreferenceService, schema: PreferenceSchema = ProblemConfigSchema): ProblemPreferences {
+    return createPreferenceProxy(preferences, schema);
+}
 
 export const bindProblemPreferences = (bind: interfaces.Bind): void => {
     bind(ProblemPreferences).toDynamicValue(ctx => {
         const preferences = ctx.container.get<PreferenceService>(PreferenceService);
-        return createProblemPreferences(preferences);
-    });
-    bind(PreferenceContribution).toConstantValue({ schema: ProblemConfigSchema });
+        const contribution = ctx.container.get<PreferenceContribution>(ProblemPreferenceContribution);
+        return createProblemPreferences(preferences, contribution.schema);
+    }).inSingletonScope();
+    bind(ProblemPreferenceContribution).toConstantValue({ schema: ProblemConfigSchema });
+    bind(PreferenceContribution).toService(ProblemPreferenceContribution);
 };

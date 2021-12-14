@@ -25,6 +25,7 @@ import { FrontendApplicationStateService } from './frontend-application-state';
 import { preventNavigation, parseCssTime, animationFrame } from './browser';
 import { CorePreferences } from './core-preferences';
 import { WindowService } from './window/window-service';
+import { TooltipService } from './tooltip-service';
 
 /**
  * Clients can implement to get a callback for contributing widgets to a shell on start.
@@ -51,10 +52,10 @@ export interface FrontendApplicationContribution {
 
     /**
      * Called on `beforeunload` event, right before the window closes.
-     * Return `true` in order to prevent exit.
+     * Return `true` or an OnWillStopAction in order to prevent exit.
      * Note: No async code allowed, this function has to run on one tick.
      */
-    onWillStop?(app: FrontendApplication): boolean | void;
+    onWillStop?(app: FrontendApplication): boolean | undefined | OnWillStopAction;
 
     /**
      * Called when an application is stopped or unloaded.
@@ -74,6 +75,23 @@ export interface FrontendApplicationContribution {
      * An event is emitted when a layout is initialized, but before the shell is attached.
      */
     onDidInitializeLayout?(app: FrontendApplication): MaybePromise<void>;
+}
+
+export interface OnWillStopAction {
+    /**
+     * @resolves to `true` if it is safe to close the application; `false` otherwise.
+     */
+    action: () => MaybePromise<boolean>;
+    /**
+     * A descriptive string for the reason preventing close.
+     */
+    reason: string;
+}
+
+export namespace OnWillStopAction {
+    export function is(candidate: unknown): candidate is OnWillStopAction {
+        return typeof candidate === 'object' && !!candidate && 'action' in candidate && 'reason' in candidate;
+    }
 }
 
 const TIMER_WARNING_THRESHOLD = 100;
@@ -99,6 +117,9 @@ export class FrontendApplication {
 
     @inject(WindowService)
     protected readonly windowsService: WindowService;
+
+    @inject(TooltipService)
+    protected readonly tooltipService: TooltipService;
 
     constructor(
         @inject(CommandRegistry) protected readonly commands: CommandRegistry,
@@ -130,6 +151,7 @@ export class FrontendApplication {
 
         const host = await this.getHost();
         this.attachShell(host);
+        this.attachTooltip(host);
         await animationFrame();
         this.stateService.state = 'attached_shell';
 
@@ -222,6 +244,13 @@ export class FrontendApplication {
     }
 
     /**
+     * Attach the tooltip container to the host element.
+     */
+    protected attachTooltip(host: HTMLElement): void {
+        this.tooltipService.attachTo(host);
+    }
+
+    /**
      * If a startup indicator is present, it is first hidden with the `theia-hidden` CSS class and then
      * removed after a while. The delay until removal is taken from the CSS transition duration.
      */
@@ -231,6 +260,7 @@ export class FrontendApplication {
             return new Promise(resolve => {
                 window.requestAnimationFrame(() => {
                     startupElem.classList.add('theia-hidden');
+                    console.log(`Finished loading frontend application after ${(performance.now() / 1000).toFixed(3)} seconds`);
                     const preloadStyle = window.getComputedStyle(startupElem);
                     const transitionDuration = parseCssTime(preloadStyle.transitionDuration, 0);
                     window.setTimeout(() => {

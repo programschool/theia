@@ -16,10 +16,9 @@
 
 import * as theia from '@theia/plugin';
 import { Event, Emitter } from '@theia/core/lib/common/event';
-import { StorageMain, StorageExt } from '../common/plugin-api-rpc';
+import { PLUGIN_RPC_CONTEXT, StorageMain, StorageExt } from '../common/plugin-api-rpc';
 import { KeysToAnyValues, KeysToKeysToAnyValue } from '../common/types';
 import { RPCProtocol } from '../common/rpc-protocol';
-import { PLUGIN_RPC_CONTEXT } from '../common/plugin-api-rpc';
 
 export class Memento implements theia.Memento {
 
@@ -58,6 +57,12 @@ export class Memento implements theia.Memento {
         }
         return this.storage.setPerPluginData(this.pluginId, this.cache, this.isPluginGlobalData).then(_ => undefined);
     }
+}
+
+export class GlobalState extends Memento {
+
+    /** @todo: API is not yet implemented. */
+    setKeysForSync(keys: readonly string[]): void { }
 }
 
 /**

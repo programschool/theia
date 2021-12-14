@@ -18,11 +18,12 @@ import * as cp from 'child_process';
 import { injectable, inject, named } from '@theia/core/shared/inversify';
 import { ILogger, ConnectionErrorHandler, ContributionProvider, MessageService } from '@theia/core/lib/common';
 import { createIpcEnv } from '@theia/core/lib/node/messaging/ipc-protocol';
-import { HostedPluginClient, ServerPluginRunner, PluginHostEnvironmentVariable, DeployedPlugin } from '../../common/plugin-protocol';
+import { HostedPluginClient, ServerPluginRunner, PluginHostEnvironmentVariable, DeployedPlugin, PLUGIN_HOST_BACKEND } from '../../common/plugin-protocol';
 import { MessageType } from '../../common/rpc-protocol';
 import { HostedPluginCliContribution } from './hosted-plugin-cli-contribution';
 import * as psTree from 'ps-tree';
 import { Deferred } from '@theia/core/lib/common/promise-util';
+import { HostedPluginLocalizationService } from './hosted-plugin-localization-service';
 
 export interface IPCConnectionOptions {
     readonly serverName: string;
@@ -55,6 +56,9 @@ export class HostedPluginProcess implements ServerPluginRunner {
     @inject(MessageService)
     protected readonly messageService: MessageService;
 
+    @inject(HostedPluginLocalizationService)
+    protected readonly localizationService: HostedPluginLocalizationService;
+
     private childProcess: cp.ChildProcess | undefined;
     private client: HostedPluginClient;
 
@@ -78,14 +82,14 @@ export class HostedPluginProcess implements ServerPluginRunner {
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    public acceptMessage(jsonMessage: any): boolean {
-        return jsonMessage.type !== undefined && jsonMessage.id;
+    public acceptMessage(pluginHostId: string, message: string): boolean {
+        return pluginHostId === 'main';
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    public onMessage(jsonMessage: any): void {
+    public onMessage(pluginHostId: string, jsonMessage: string): void {
         if (this.childProcess) {
-            this.childProcess.send(JSON.stringify(jsonMessage));
+            this.childProcess.send(jsonMessage);
         }
     }
 
@@ -154,7 +158,7 @@ export class HostedPluginProcess implements ServerPluginRunner {
         });
         this.childProcess.on('message', message => {
             if (this.client) {
-                this.client.postMessage(message);
+                this.client.postMessage(PLUGIN_HOST_BACKEND, message);
             }
         });
     }
@@ -169,6 +173,7 @@ export class HostedPluginProcess implements ServerPluginRunner {
                 delete env[key];
             }
         }
+        env['VSCODE_NLS_CONFIG'] = JSON.stringify(this.localizationService.getNlsConfig());
         // apply external env variables
         this.pluginHostEnvironmentVariables.getContributions().forEach(envVar => envVar.process(env));
         if (this.cli.extensionTestsPath) {

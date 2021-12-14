@@ -17,11 +17,13 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
 import URI from '@theia/core/lib/common/uri';
 import { QuickFileOpenService, quickFileOpen } from './quick-file-open';
-import { CommandRegistry, CommandContribution } from '@theia/core/lib/common';
-import { KeybindingRegistry, KeybindingContribution, QuickOpenContribution, QuickOpenHandlerRegistry } from '@theia/core/lib/browser';
+import { CommandRegistry, CommandContribution, MenuContribution, MenuModelRegistry } from '@theia/core/lib/common';
+import { KeybindingRegistry, KeybindingContribution, QuickAccessContribution } from '@theia/core/lib/browser';
+import { EditorMainMenu } from '@theia/editor/lib/browser';
+import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
-export class QuickFileOpenFrontendContribution implements CommandContribution, KeybindingContribution, QuickOpenContribution {
+export class QuickFileOpenFrontendContribution implements QuickAccessContribution, CommandContribution, KeybindingContribution, MenuContribution {
 
     @inject(QuickFileOpenService)
     protected readonly quickFileOpenService: QuickFileOpenService;
@@ -50,7 +52,15 @@ export class QuickFileOpenFrontendContribution implements CommandContribution, K
         });
     }
 
-    registerQuickOpenHandlers(handlers: QuickOpenHandlerRegistry): void {
-        handlers.registerHandler(this.quickFileOpenService, true);
+    registerMenus(menus: MenuModelRegistry): void {
+        menus.registerMenuAction(EditorMainMenu.WORKSPACE_GROUP, {
+            commandId: quickFileOpen.id,
+            label: nls.localizeByDefault('Go to File...'),
+            order: '1',
+        });
+    }
+
+    registerQuickAccessProvider(): void {
+        this.quickFileOpenService.registerQuickAccessProvider();
     }
 }

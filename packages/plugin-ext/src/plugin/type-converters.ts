@@ -15,19 +15,18 @@
  ********************************************************************************/
 
 import * as theia from '@theia/plugin';
-import { Position as P, Range as R, SymbolInformation, SymbolKind as S } from '@theia/core/shared/vscode-languageserver-types';
-import { URI } from '@theia/core/shared/vscode-uri';
+import * as lstypes from '@theia/core/shared/vscode-languageserver-types';
+import { URI } from './types-impl';
 import * as rpc from '../common/plugin-api-rpc';
 import {
-    DecorationOptions, EditorPosition, PickOpenItem, Plugin, Position, WorkspaceTextEditDto, WorkspaceFileEditDto, Selection, TaskDto, WorkspaceEditDto
+    DecorationOptions, EditorPosition, Plugin, Position, WorkspaceTextEditDto, WorkspaceFileEditDto, Selection, TaskDto, WorkspaceEditDto
 } from '../common/plugin-api-rpc';
 import * as model from '../common/plugin-api-rpc-model';
 import { LanguageFilter, LanguageSelector, RelativePattern } from '@theia/callhierarchy/lib/common/language-selector';
 import { isMarkdownString, MarkdownString } from './markdown-string';
-import { Item } from './quick-open';
 import * as types from './types-impl';
 import { UriComponents } from '../common/uri-components';
-import { TaskGroup } from './types-impl';
+import { isReadonlyArray } from '../common/arrays';
 
 const SIDE_GROUP = -2;
 const ACTIVE_GROUP = -1;
@@ -109,10 +108,6 @@ export function fromSelection(selection: types.Selection): Selection {
 }
 
 export function toRange(range: model.Range): types.Range {
-    // if (!range) {
-    //     return undefined;
-    // }
-
     const { startLineNumber, startColumn, endLineNumber, endColumn } = range;
     return new types.Range(startLineNumber - 1, startColumn - 1, endLineNumber - 1, endColumn - 1);
 }
@@ -173,10 +168,7 @@ export function fromRangeOrRangeWithMessage(ranges: theia.Range[] | theia.Decora
             };
         });
     } else {
-        return ranges.map((r): DecorationOptions =>
-        ({
-            range: fromRange(r)!
-        }));
+        return ranges.map(r => ({ range: fromRange(r) }));
     }
 }
 
@@ -218,7 +210,7 @@ export function toMarkdown(value: model.MarkdownString): MarkdownString {
 export function fromDocumentSelector(selector: theia.DocumentSelector | undefined): LanguageSelector | undefined {
     if (!selector) {
         return undefined;
-    } else if (Array.isArray(selector)) {
+    } else if (isReadonlyArray(selector)) {
         return <LanguageSelector>selector.map(fromDocumentSelector);
     } else if (typeof selector === 'string') {
         return selector;
@@ -276,6 +268,8 @@ export function fromCompletionItemKind(kind?: types.CompletionItemKind): model.C
         case types.CompletionItemKind.Event: return model.CompletionItemKind.Event;
         case types.CompletionItemKind.Operator: return model.CompletionItemKind.Operator;
         case types.CompletionItemKind.TypeParameter: return model.CompletionItemKind.TypeParameter;
+        case types.CompletionItemKind.User: return model.CompletionItemKind.User;
+        case types.CompletionItemKind.Issue: return model.CompletionItemKind.Issue;
     }
     return model.CompletionItemKind.Property;
 }
@@ -307,6 +301,8 @@ export function toCompletionItemKind(kind?: model.CompletionItemKind): types.Com
         case model.CompletionItemKind.Event: return types.CompletionItemKind.Event;
         case model.CompletionItemKind.Operator: return types.CompletionItemKind.Operator;
         case model.CompletionItemKind.TypeParameter: return types.CompletionItemKind.TypeParameter;
+        case model.CompletionItemKind.User: return types.CompletionItemKind.User;
+        case model.CompletionItemKind.Issue: return types.CompletionItemKind.Issue;
     }
     return types.CompletionItemKind.Property;
 }
@@ -377,7 +373,12 @@ function convertTags(tags: types.DiagnosticTag[] | undefined): types.MarkerTag[]
     const markerTags: types.MarkerTag[] = [];
     for (const tag of tags) {
         switch (tag) {
-            case types.DiagnosticTag.Unnecessary: markerTags.push(types.MarkerTag.Unnecessary);
+            case types.DiagnosticTag.Unnecessary:
+                markerTags.push(types.MarkerTag.Unnecessary);
+                break;
+            case types.DiagnosticTag.Deprecated:
+                markerTags.push(types.MarkerTag.Deprecated);
+                break;
         }
     }
     return markerTags;
@@ -395,6 +396,16 @@ export function fromLocation(location: theia.Location): model.Location {
         uri: location.uri,
         range: fromRange(location.range)
     };
+}
+
+export function fromTextDocumentShowOptions(options: theia.TextDocumentShowOptions): model.TextDocumentShowOptions {
+    if (options.selection) {
+        return {
+            ...options,
+            selection: fromRange(options.selection),
+        };
+    }
+    return options as model.TextDocumentShowOptions;
 }
 
 export function fromDefinitionLink(definitionLink: theia.DefinitionLink): model.LocationLink {
@@ -636,7 +647,10 @@ export function isModelCallHierarchyItem(thing: any): thing is model.CallHierarc
     if (!thing) {
         return false;
     }
-    return false;
+    return isModelRange(thing.range)
+        && isModelRange(thing.selectionRange)
+        && isUriComponents(thing.uri)
+        && !!thing.name;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -644,7 +658,8 @@ export function isModelCallHierarchyIncomingCall(thing: any): thing is model.Cal
     if (!thing) {
         return false;
     }
-    return false;
+    const maybeIncomingCall = thing as model.CallHierarchyIncomingCall;
+    return 'from' in maybeIncomingCall && 'fromRanges' in maybeIncomingCall && isModelCallHierarchyItem(maybeIncomingCall.from);
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -652,7 +667,8 @@ export function isModelCallHierarchyOutgoingCall(thing: any): thing is model.Cal
     if (!thing) {
         return false;
     }
-    return false;
+    const maybeOutgoingCall = thing as model.CallHierarchyOutgoingCall;
+    return 'to' in maybeOutgoingCall && 'fromRanges' in maybeOutgoingCall && isModelCallHierarchyItem(maybeOutgoingCall.to);
 }
 
 export function toLocation(value: model.Location): types.Location {
@@ -666,18 +682,24 @@ export function fromCallHierarchyItem(item: theia.CallHierarchyItem): model.Call
         detail: item.detail,
         uri: item.uri,
         range: fromRange(item.range),
-        selectionRange: fromRange(item.selectionRange)
+        selectionRange: fromRange(item.selectionRange),
+        tags: item.tags,
+        data: item.data,
     };
 }
 
 export function toCallHierarchyItem(value: model.CallHierarchyItem): types.CallHierarchyItem {
-    return new types.CallHierarchyItem(
+    const item = new types.CallHierarchyItem(
         SymbolKind.toSymbolKind(value.kind),
         value.name,
         value.detail ? value.detail : '',
         URI.revive(value.uri),
         toRange(value.range),
-        toRange(value.selectionRange));
+        toRange(value.selectionRange),
+    );
+    item.tags = value.tags;
+    item.data = value.data;
+    return item;
 }
 
 export function toCallHierarchyIncomingCall(value: model.CallHierarchyIncomingCall): types.CallHierarchyIncomingCall {
@@ -708,6 +730,7 @@ export function fromTask(task: theia.Task): TaskDto | undefined {
     const taskDto = {} as TaskDto;
     taskDto.label = task.name;
     taskDto.source = task.source;
+
     if ((task as types.Task).hasProblemMatchers) {
         taskDto.problemMatcher = task.problemMatchers;
     }
@@ -720,10 +743,14 @@ export function fromTask(task: theia.Task): TaskDto | undefined {
         taskDto.scope = task.scope;
     }
 
+    if (task.presentationOptions) {
+        taskDto.presentation = task.presentationOptions;
+    }
+
     const group = task.group;
-    if (group === TaskGroup.Build) {
+    if (group === types.TaskGroup.Build) {
         taskDto.group = BUILD_GROUP;
-    } else if (group === TaskGroup.Test) {
+    } else if (group === types.TaskGroup.Test) {
         taskDto.group = TEST_GROUP;
     }
 
@@ -745,12 +772,16 @@ export function fromTask(task: theia.Task): TaskDto | undefined {
         return taskDto;
     }
 
-    if (taskDefinition.type === 'shell' || types.ShellExecution.is(execution)) {
-        return fromShellExecution(<theia.ShellExecution>execution, taskDto);
+    if (types.ShellExecution.is(execution)) {
+        return fromShellExecution(execution, taskDto);
     }
 
-    if (taskDefinition.type === 'process' || types.ProcessExecution.is(execution)) {
-        return fromProcessExecution(<theia.ProcessExecution>execution, taskDto);
+    if (types.ProcessExecution.is(execution)) {
+        return fromProcessExecution(execution, taskDto);
+    }
+
+    if (types.CustomExecution.is(execution)) {
+        return fromCustomExecution(execution, taskDto);
     }
 
     return taskDto;
@@ -761,7 +792,7 @@ export function toTask(taskDto: TaskDto): theia.Task {
         throw new Error('Task should be provided for converting');
     }
 
-    const { type, label, source, scope, problemMatcher, detail, command, args, options, windows, group, ...properties } = taskDto;
+    const { type, taskType, label, source, scope, problemMatcher, detail, command, args, options, group, presentation, ...properties } = taskDto;
     const result = {} as theia.Task;
     result.name = label;
     result.source = source;
@@ -779,9 +810,8 @@ export function toTask(taskDto: TaskDto): theia.Task {
         result.scope = scope;
     }
 
-    const taskType = type;
     const taskDefinition: theia.TaskDefinition = {
-        type: taskType
+        type: type
     };
 
     result.definition = taskDefinition;
@@ -795,12 +825,26 @@ export function toTask(taskDto: TaskDto): theia.Task {
         result.execution = getShellExecution(taskDto);
     }
 
+    if (taskType === 'customExecution' || types.CustomExecution.is(execution)) {
+        result.execution = getCustomExecution(taskDto);
+        // if taskType is customExecution, we need to put all the information into taskDefinition,
+        // because some parameters may be in taskDefinition.
+        taskDefinition.label = label;
+        taskDefinition.command = command;
+        taskDefinition.args = args;
+        taskDefinition.options = options;
+    }
+
     if (group) {
         if (group === BUILD_GROUP) {
-            result.group = TaskGroup.Build;
+            result.group = types.TaskGroup.Build;
         } else if (group === TEST_GROUP) {
-            result.group = TaskGroup.Test;
+            result.group = types.TaskGroup.Test;
         }
+    }
+
+    if (presentation) {
+        result.presentationOptions = presentation;
     }
 
     if (!properties) {
@@ -817,6 +861,7 @@ export function toTask(taskDto: TaskDto): theia.Task {
 }
 
 export function fromProcessExecution(execution: theia.ProcessExecution, taskDto: TaskDto): TaskDto {
+    taskDto.taskType = 'process';
     taskDto.command = execution.process;
     taskDto.args = execution.args;
 
@@ -828,6 +873,7 @@ export function fromProcessExecution(execution: theia.ProcessExecution, taskDto:
 }
 
 export function fromShellExecution(execution: theia.ShellExecution, taskDto: TaskDto): TaskDto {
+    taskDto.taskType = 'shell';
     const options = execution.options;
     if (options) {
         taskDto.options = getShellExecutionOptions(options);
@@ -849,6 +895,17 @@ export function fromShellExecution(execution: theia.ShellExecution, taskDto: Tas
     }
 }
 
+export function fromCustomExecution(execution: theia.CustomExecution, taskDto: TaskDto): TaskDto {
+    taskDto.taskType = 'customExecution';
+    const callback = execution.callback;
+    if (callback) {
+        taskDto.callback = callback;
+        return taskDto;
+    } else {
+        throw new Error('Converting CustomExecution callback is not implemented');
+    }
+}
+
 export function getProcessExecution(taskDto: TaskDto): theia.ProcessExecution {
     return new types.ProcessExecution(
         taskDto.command,
@@ -866,6 +923,10 @@ export function getShellExecution(taskDto: TaskDto): theia.ShellExecution {
     return new types.ShellExecution(
         taskDto.command || taskDto.commandLine,
         taskDto.options || {});
+}
+
+export function getCustomExecution(taskDto: TaskDto): theia.CustomExecution {
+    return new types.CustomExecution(taskDto.callback);
 }
 
 export function getShellArgs(args: undefined | (string | theia.ShellQuotedString)[]): string[] {
@@ -921,29 +982,30 @@ export function getShellExecutionOptions(options: theia.ShellExecutionOptions): 
     return result;
 }
 
-export function fromSymbolInformation(symbolInformation: theia.SymbolInformation): SymbolInformation | undefined {
+export function fromSymbolInformation(symbolInformation: theia.SymbolInformation): lstypes.SymbolInformation | undefined {
     if (!symbolInformation) {
         return undefined;
     }
 
     if (symbolInformation.location && symbolInformation.location.range) {
-        const p1 = P.create(symbolInformation.location.range.start.line, symbolInformation.location.range.start.character);
-        const p2 = P.create(symbolInformation.location.range.end.line, symbolInformation.location.range.end.character);
-        return SymbolInformation.create(symbolInformation.name, symbolInformation.kind++ as S, R.create(p1, p2),
+        const p1 = lstypes.Position.create(symbolInformation.location.range.start.line, symbolInformation.location.range.start.character);
+        const p2 = lstypes.Position.create(symbolInformation.location.range.end.line, symbolInformation.location.range.end.character);
+        return lstypes.SymbolInformation.create(symbolInformation.name, symbolInformation.kind++ as lstypes.SymbolKind, lstypes.Range.create(p1, p2),
             symbolInformation.location.uri.toString(), symbolInformation.containerName);
     }
 
-    return <SymbolInformation>{
+    return {
         name: symbolInformation.name,
         containerName: symbolInformation.containerName,
-        kind: symbolInformation.kind++ as S,
+        kind: symbolInformation.kind++ as lstypes.SymbolKind,
         location: {
-            uri: symbolInformation.location.uri.toString()
+            uri: symbolInformation.location.uri.toString(),
+            range: symbolInformation.location.range,
         }
     };
 }
 
-export function toSymbolInformation(symbolInformation: SymbolInformation): theia.SymbolInformation | undefined {
+export function toSymbolInformation(symbolInformation: lstypes.SymbolInformation): theia.SymbolInformation | undefined {
     if (!symbolInformation) {
         return undefined;
     }
@@ -1004,20 +1066,20 @@ export function fromColorPresentation(colorPresentation: theia.ColorPresentation
     };
 }
 
-export function quickPickItemToPickOpenItem(items: Item[]): PickOpenItem[] {
-    const pickItems: PickOpenItem[] = [];
+export function convertToTransferQuickPickItems(items: rpc.Item[]): rpc.TransferQuickPickItems[] {
+    const pickItems: rpc.TransferQuickPickItems[] = [];
     for (let handle = 0; handle < items.length; handle++) {
         const item = items[handle];
         let label: string;
         let description: string | undefined;
         let detail: string | undefined;
         let picked: boolean | undefined;
-        let groupLabel: string | undefined;
-        let showBorder: boolean | undefined;
+        let alwaysShow: boolean | undefined;
+
         if (typeof item === 'string') {
             label = item;
         } else {
-            ({ label, description, detail, picked, groupLabel, showBorder } = item);
+            ({ label, description, detail, picked, alwaysShow } = item);
         }
 
         pickItems.push({
@@ -1026,8 +1088,7 @@ export function quickPickItemToPickOpenItem(items: Item[]): PickOpenItem[] {
             handle,
             detail,
             picked,
-            groupLabel,
-            showBorder
+            alwaysShow
         });
     }
     return pickItems;

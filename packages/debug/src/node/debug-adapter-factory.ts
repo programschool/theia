@@ -32,14 +32,15 @@ import {
 } from '@theia/process/lib/node';
 import {
     DebugAdapterExecutable,
-    CommunicationProvider,
     DebugAdapterSession,
     DebugAdapterSessionFactory,
     DebugAdapterFactory,
-    DebugAdapterForkExecutable
-} from '../common/debug-model';
+    DebugAdapterForkExecutable,
+    DebugAdapter
+} from './debug-model';
 import { DebugAdapterSessionImpl } from './debug-adapter-session';
 import { environment } from '@theia/core/shared/@theia/application-package';
+import { ProcessDebugAdapter, SocketDebugAdapter } from './stream-debug-adapter';
 
 /**
  * [DebugAdapterFactory](#DebugAdapterFactory) implementation based on
@@ -52,15 +53,16 @@ export class LaunchBasedDebugAdapterFactory implements DebugAdapterFactory {
     @inject(ProcessManager)
     protected readonly processManager: ProcessManager;
 
-    start(executable: DebugAdapterExecutable): CommunicationProvider {
+    start(executable: DebugAdapterExecutable): DebugAdapter {
         const process = this.childProcess(executable);
 
+        if (!process.process) {
+            throw new Error(`Could not start debug adapter process: ${JSON.stringify(executable)}`);
+        }
+
         // FIXME: propagate onError + onExit
-        return {
-            input: process.inputStream,
-            output: process.outputStream,
-            dispose: () => process.kill()
-        };
+        const provider = new ProcessDebugAdapter(process.process);
+        return provider;
     }
 
     private childProcess(executable: DebugAdapterExecutable): RawProcess {
@@ -81,14 +83,12 @@ export class LaunchBasedDebugAdapterFactory implements DebugAdapterFactory {
         return this.processFactory(processOptions);
     }
 
-    connect(debugServerPort: number): CommunicationProvider {
+    connect(debugServerPort: number): DebugAdapter {
         const socket = net.createConnection(debugServerPort);
         // FIXME: propagate socket.on('error', ...) + socket.on('close', ...)
-        return {
-            input: socket,
-            output: socket,
-            dispose: () => socket.end()
-        };
+
+        const provider = new SocketDebugAdapter(socket);
+        return provider;
     }
 }
 
@@ -98,10 +98,10 @@ export class LaunchBasedDebugAdapterFactory implements DebugAdapterFactory {
 @injectable()
 export class DebugAdapterSessionFactoryImpl implements DebugAdapterSessionFactory {
 
-    get(sessionId: string, communicationProvider: CommunicationProvider): DebugAdapterSession {
+    get(sessionId: string, debugAdapter: DebugAdapter): DebugAdapterSession {
         return new DebugAdapterSessionImpl(
             sessionId,
-            communicationProvider
+            debugAdapter
         );
     }
 }

@@ -18,6 +18,8 @@ import * as React from '@theia/core/shared/react';
 import { DisposableCollection } from '@theia/core';
 import { NotificationManager, NotificationUpdateEvent } from './notifications-manager';
 import { NotificationComponent } from './notification-component';
+import { codicon } from '@theia/core/lib/browser';
+import { nls } from '@theia/core/lib/common/nls';
 
 const PerfectScrollbar = require('react-perfect-scrollbar');
 
@@ -55,15 +57,19 @@ export class NotificationCenterComponent extends React.Component<NotificationCen
 
     render(): React.ReactNode {
         const empty = this.state.notifications.length === 0;
-        const title = empty ? 'NO NEW NOTIFICATIONS' : 'NOTIFICATIONS';
+        const title = empty
+            ? nls.localizeByDefault('No New Notifications')
+            : nls.localizeByDefault('Notifications');
         return (
             <div className={`theia-notifications-container theia-notification-center ${this.state.visibilityState === 'center' ? 'open' : 'closed'}`}>
                 <div className='theia-notification-center-header'>
                     <div className='theia-notification-center-header-title'>{title}</div>
                     <div className='theia-notification-center-header-actions'>
                         <ul className='theia-notification-actions'>
-                            <li className='collapse' title='Hide Notification Center' onClick={this.onHide} />
-                            <li className='clear-all' title='Clear All' onClick={this.onClearAll} />
+                            <li className={codicon('clear-all', true)} title={nls.localizeByDefault('Clear All Notifications')}
+                                onClick={this.onClearAll} />
+                            <li className={codicon('chevron-down', true)} title={nls.localizeByDefault('Hide Notifications')}
+                                onClick={this.onHide} />
                         </ul>
                     </div>
                 </div>

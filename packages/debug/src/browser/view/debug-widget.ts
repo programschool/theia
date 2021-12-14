@@ -16,13 +16,14 @@
 
 import { injectable, postConstruct, inject, interfaces, Container } from '@theia/core/shared/inversify';
 import {
-    BaseWidget, PanelLayout, Message, ApplicationShell, Widget, StatefulWidget, ViewContainer
+    BaseWidget, PanelLayout, Message, ApplicationShell, Widget, StatefulWidget, ViewContainer, codicon
 } from '@theia/core/lib/browser';
 import { DebugSessionWidget } from './debug-session-widget';
 import { DebugConfigurationWidget } from './debug-configuration-widget';
 import { DebugViewModel } from './debug-view-model';
 import { DebugSessionManager } from '../debug-session-manager';
 import { ProgressBarFactory } from '@theia/core/lib/browser/progress-bar-factory';
+import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
 export class DebugWidget extends BaseWidget implements StatefulWidget, ApplicationShell.TrackableWidgetProvider {
@@ -38,7 +39,7 @@ export class DebugWidget extends BaseWidget implements StatefulWidget, Applicati
     }
 
     static ID = 'debug';
-    static LABEL = 'Debug';
+    static LABEL = nls.localizeByDefault('Debug');
 
     @inject(DebugViewModel)
     readonly model: DebugViewModel;
@@ -61,7 +62,7 @@ export class DebugWidget extends BaseWidget implements StatefulWidget, Applicati
         this.title.label = DebugWidget.LABEL;
         this.title.caption = DebugWidget.LABEL;
         this.title.closable = true;
-        this.title.iconClass = 'debug-tab-icon';
+        this.title.iconClass = codicon('debug-alt');
         this.addClass('theia-debug-container');
         this.toDispose.pushAll([
             this.toolbar,

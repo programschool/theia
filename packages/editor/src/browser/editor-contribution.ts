@@ -16,30 +16,35 @@
 
 import { EditorManager } from './editor-manager';
 import { TextEditor } from './editor';
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import { StatusBarAlignment, StatusBar } from '@theia/core/lib/browser/status-bar/status-bar';
-import { FrontendApplicationContribution, DiffUris } from '@theia/core/lib/browser';
+import {
+    FrontendApplicationContribution, DiffUris, DockLayout,
+    QuickInputService, KeybindingRegistry, KeybindingContribution, SHELL_TABBAR_CONTEXT_SPLIT, ApplicationShell
+} from '@theia/core/lib/browser';
 import { ContextKeyService } from '@theia/core/lib/browser/context-key-service';
-import { DisposableCollection } from '@theia/core';
+import { CommandHandler, DisposableCollection, MenuContribution, MenuModelRegistry } from '@theia/core';
 import { EditorCommands } from './editor-command';
-import { EditorQuickOpenService } from './editor-quick-open-service';
 import { CommandRegistry, CommandContribution } from '@theia/core/lib/common';
-import { KeybindingRegistry, KeybindingContribution, QuickOpenContribution, QuickOpenHandlerRegistry } from '@theia/core/lib/browser';
 import { LanguageService } from '@theia/core/lib/browser/language-service';
 import { SUPPORTED_ENCODINGS } from '@theia/core/lib/browser/supported-encodings';
+import { nls } from '@theia/core/lib/common/nls';
+import { CurrentWidgetCommandAdapter } from '@theia/core/lib/browser/shell/current-widget-command-adapter';
+import { EditorWidget } from './editor-widget';
 
 @injectable()
-export class EditorContribution implements FrontendApplicationContribution, CommandContribution, KeybindingContribution, QuickOpenContribution {
+export class EditorContribution implements FrontendApplicationContribution, CommandContribution, KeybindingContribution, MenuContribution {
 
     @inject(StatusBar) protected readonly statusBar: StatusBar;
     @inject(EditorManager) protected readonly editorManager: EditorManager;
     @inject(LanguageService) protected readonly languages: LanguageService;
+    @inject(ApplicationShell) protected readonly shell: ApplicationShell;
 
     @inject(ContextKeyService)
     protected readonly contextKeyService: ContextKeyService;
 
-    @inject(EditorQuickOpenService)
-    protected readonly editorQuickOpenService: EditorQuickOpenService;
+    @inject(QuickInputService) @optional()
+    protected readonly quickInputService: QuickInputService;
 
     onStart(): void {
         this.initEditorContextKeys();
@@ -96,7 +101,7 @@ export class EditorContribution implements FrontendApplicationContribution, Comm
             alignment: StatusBarAlignment.RIGHT,
             priority: 1,
             command: EditorCommands.CHANGE_LANGUAGE.id,
-            tooltip: 'Select Language Mode'
+            tooltip: nls.localizeByDefault('Select Language Mode')
         });
     }
 
@@ -110,7 +115,7 @@ export class EditorContribution implements FrontendApplicationContribution, Comm
             alignment: StatusBarAlignment.RIGHT,
             priority: 10,
             command: EditorCommands.CHANGE_ENCODING.id,
-            tooltip: 'Select Encoding'
+            tooltip: nls.localizeByDefault('Select Encoding')
         });
     }
 
@@ -121,18 +126,36 @@ export class EditorContribution implements FrontendApplicationContribution, Comm
         }
         const { cursor } = editor;
         this.statusBar.setElement('editor-status-cursor-position', {
-            text: `Ln ${cursor.line + 1}, Col ${editor.getVisibleColumn(cursor)}`,
+            text: nls.localizeByDefault('Ln {0}, Col {1}', cursor.line + 1, editor.getVisibleColumn(cursor)),
             alignment: StatusBarAlignment.RIGHT,
             priority: 100,
-            tooltip: 'Go To Line',
-            command: 'editor.action.gotoLine'
+            tooltip: EditorCommands.GOTO_LINE_COLUMN.label,
+            command: EditorCommands.GOTO_LINE_COLUMN.id
         });
     }
 
     registerCommands(commands: CommandRegistry): void {
         commands.registerCommand(EditorCommands.SHOW_ALL_OPENED_EDITORS, {
-            execute: () => this.editorQuickOpenService.open()
+            execute: () => this.quickInputService?.open('edt ')
         });
+        const splitHandlerFactory = (splitMode: DockLayout.InsertMode): CommandHandler => new CurrentWidgetCommandAdapter(this.shell, {
+            isEnabled: title => title?.owner instanceof EditorWidget,
+            isVisible: title => title?.owner instanceof EditorWidget,
+            execute: async title => {
+                if (title?.owner instanceof EditorWidget) {
+                    const selection = title.owner.editor.selection;
+                    const newEditor = await this.editorManager.openToSide(title.owner.editor.uri, { selection, widgetOptions: { mode: splitMode, ref: title.owner } });
+                    const oldEditorState = title.owner.editor.storeViewState();
+                    newEditor.editor.restoreViewState(oldEditorState);
+                }
+            }
+        });
+        commands.registerCommand(EditorCommands.SPLIT_EDITOR_HORIZONTAL, splitHandlerFactory('split-right'));
+        commands.registerCommand(EditorCommands.SPLIT_EDITOR_VERTICAL, splitHandlerFactory('split-bottom'));
+        commands.registerCommand(EditorCommands.SPLIT_EDITOR_RIGHT, splitHandlerFactory('split-right'));
+        commands.registerCommand(EditorCommands.SPLIT_EDITOR_DOWN, splitHandlerFactory('split-bottom'));
+        commands.registerCommand(EditorCommands.SPLIT_EDITOR_UP, splitHandlerFactory('split-top'));
+        commands.registerCommand(EditorCommands.SPLIT_EDITOR_LEFT, splitHandlerFactory('split-left'));
     }
 
     registerKeybindings(keybindings: KeybindingRegistry): void {
@@ -140,9 +163,36 @@ export class EditorContribution implements FrontendApplicationContribution, Comm
             command: EditorCommands.SHOW_ALL_OPENED_EDITORS.id,
             keybinding: 'ctrlcmd+k ctrlcmd+p'
         });
+        keybindings.registerKeybinding({
+            command: EditorCommands.SPLIT_EDITOR_HORIZONTAL.id,
+            keybinding: 'ctrlcmd+\\',
+        });
+        keybindings.registerKeybinding({
+            command: EditorCommands.SPLIT_EDITOR_VERTICAL.id,
+            keybinding: 'ctrlcmd+k ctrlcmd+\\',
+        });
     }
 
-    registerQuickOpenHandlers(handlers: QuickOpenHandlerRegistry): void {
-        handlers.registerHandler(this.editorQuickOpenService);
+    registerMenus(registry: MenuModelRegistry): void {
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_SPLIT, {
+            commandId: EditorCommands.SPLIT_EDITOR_UP.id,
+            label: nls.localizeByDefault('Split Up'),
+            order: '1',
+        });
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_SPLIT, {
+            commandId: EditorCommands.SPLIT_EDITOR_DOWN.id,
+            label: nls.localizeByDefault('Split Down'),
+            order: '2',
+        });
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_SPLIT, {
+            commandId: EditorCommands.SPLIT_EDITOR_LEFT.id,
+            label: nls.localizeByDefault('Split Left'),
+            order: '3',
+        });
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_SPLIT, {
+            commandId: EditorCommands.SPLIT_EDITOR_RIGHT.id,
+            label: nls.localizeByDefault('Split Right'),
+            order: '4',
+        });
     }
 }

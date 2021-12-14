@@ -19,10 +19,11 @@ import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-con
 import { FrontendApplicationContribution, FrontendApplication } from '@theia/core/lib/browser/frontend-application';
 import { Command, CommandRegistry } from '@theia/core/lib/common/command';
 import { TabBarToolbarContribution, TabBarToolbarRegistry } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
-import { Widget } from '@theia/core/lib/browser/widgets';
+import { codicon, Widget } from '@theia/core/lib/browser/widgets';
 import { OutlineViewWidget } from './outline-view-widget';
 import { CompositeTreeNode } from '@theia/core/lib/browser/tree';
 import { OS } from '@theia/core/lib/common/os';
+import { nls } from '@theia/core/lib/common/nls';
 
 export const OUTLINE_WIDGET_FACTORY_ID = 'outline-view';
 
@@ -36,7 +37,7 @@ export namespace OutlineViewCommands {
      */
     export const COLLAPSE_ALL: Command = {
         id: 'outlineView.collapse.all',
-        iconClass: 'collapse-all'
+        iconClass: codicon('collapse-all')
     };
 }
 
@@ -46,7 +47,7 @@ export class OutlineViewContribution extends AbstractViewContribution<OutlineVie
     constructor() {
         super({
             widgetId: OUTLINE_WIDGET_FACTORY_ID,
-            widgetName: 'Outline',
+            widgetName: OutlineViewWidget.LABEL,
             defaultWidgetOptions: {
                 area: 'right',
                 rank: 500
@@ -75,7 +76,7 @@ export class OutlineViewContribution extends AbstractViewContribution<OutlineVie
         toolbar.registerItem({
             id: OutlineViewCommands.COLLAPSE_ALL.id,
             command: OutlineViewCommands.COLLAPSE_ALL.id,
-            tooltip: 'Collapse All',
+            tooltip: nls.localizeByDefault('Collapse All'),
             priority: 0
         });
     }

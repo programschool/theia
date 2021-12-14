@@ -146,7 +146,7 @@ export class TaskConfigurations implements Disposable {
     }
 
     getRawTaskConfigurations(scope?: TaskConfigurationScope): (TaskCustomization | TaskConfiguration)[] {
-        if (!scope) {
+        if (scope === undefined) {
             const tasks: (TaskCustomization | TaskConfiguration)[] = [];
             for (const configs of this.rawTaskConfigurations.values()) {
                 tasks.push(...configs);
@@ -244,15 +244,14 @@ export class TaskConfigurations implements Disposable {
             return undefined;
         }
 
-        const customizationByType = this.getTaskCustomizations(taskConfig.taskType || taskConfig.type, taskConfig._scope) || [];
+        const customizationByType = this.getTaskCustomizations(taskConfig.type, taskConfig._scope) || [];
         const hasCustomization = customizationByType.length > 0;
         if (hasCustomization) {
             const taskDefinition = this.taskDefinitionRegistry.getDefinition(taskConfig);
             if (taskDefinition) {
-                const cus = customizationByType.filter(customization =>
-                    taskDefinition.properties.required.every(rp => customization[rp] === taskConfig[rp])
-                )[0]; // Only support having one customization per task
-                return cus;
+                const required = taskDefinition.properties.required || [];
+                // Only support having one customization per task.
+                return customizationByType.find(customization => required.every(property => customization[property] === taskConfig[property]));
             }
         }
         return undefined;
@@ -329,7 +328,7 @@ export class TaskConfigurations implements Disposable {
             console.error('Detected / Contributed tasks should have a task definition.');
             return;
         }
-        const customization: TaskCustomization = { type: task.taskType || task.type };
+        const customization: TaskCustomization = { type: task.type };
         definition.properties.all.forEach(p => {
             if (task[p] !== undefined) {
                 customization[p] = task[p];
@@ -457,7 +456,7 @@ export class TaskConfigurations implements Disposable {
             const jsonTasks = this.taskConfigurationManager.getTasks(scope);
             if (jsonTasks) {
                 const ind = jsonTasks.findIndex((t: TaskCustomization | TaskConfiguration) => {
-                    if (t.type !== (task.taskType || task.type)) {
+                    if (t.type !== (task.type)) {
                         return false;
                     }
                     const def = this.taskDefinitionRegistry.getDefinition(t);
@@ -503,9 +502,6 @@ export class TaskConfigurations implements Disposable {
     }
 
     private getTaskDefinition(task: TaskCustomization): TaskDefinition | undefined {
-        return this.taskDefinitionRegistry.getDefinition({
-            ...task,
-            type: typeof task.taskType === 'string' ? task.taskType : task.type
-        });
+        return this.taskDefinitionRegistry.getDefinition(task);
     }
 }

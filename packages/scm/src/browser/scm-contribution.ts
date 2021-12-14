@@ -15,17 +15,15 @@
  ********************************************************************************/
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { Emitter } from '@theia/core/lib/common/event';
-import { find } from '@theia/core/shared/@phosphor/algorithm';
 import {
     AbstractViewContribution,
     FrontendApplicationContribution, LabelProvider,
-    QuickOpenService,
     StatusBar,
     StatusBarAlignment,
     StatusBarEntry,
     KeybindingRegistry,
     ViewContainerTitleOptions,
-    ViewContainer
+    codicon
 } from '@theia/core/lib/browser';
 import { TabBarToolbarContribution, TabBarToolbarRegistry, TabBarToolbarItem } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
 import { CommandRegistry, Command, Disposable, DisposableCollection, CommandService } from '@theia/core/lib/common';
@@ -37,42 +35,47 @@ import { ScmQuickOpenService } from './scm-quick-open-service';
 import { ColorContribution } from '@theia/core/lib/browser/color-application-contribution';
 import { ColorRegistry, Color } from '@theia/core/lib/browser/color-registry';
 import { ScmCommand } from './scm-provider';
+import { ScmDecorationsService } from '../browser/decorations/scm-decorations-service';
+import { nls } from '@theia/core/lib/common/nls';
 
 export const SCM_WIDGET_FACTORY_ID = ScmWidget.ID;
 export const SCM_VIEW_CONTAINER_ID = 'scm-view-container';
 export const SCM_VIEW_CONTAINER_TITLE_OPTIONS: ViewContainerTitleOptions = {
-    label: 'Source Control',
-    iconClass: 'scm-tab-icon',
+    label: nls.localizeByDefault('Source Control'),
+    iconClass: codicon('source-control'),
     closeable: true
 };
 
 export namespace SCM_COMMANDS {
-    export const CHANGE_REPOSITORY = {
+    export const CHANGE_REPOSITORY = Command.toLocalizedCommand({
         id: 'scm.change.repository',
         category: 'SCM',
-        label: 'Change Repository...'
-    };
+        label: nls.localize('theia/scm/changeRepository', 'Change Repository...')
+    });
     export const ACCEPT_INPUT = {
         id: 'scm.acceptInput'
     };
     export const TREE_VIEW_MODE = {
         id: 'scm.viewmode.tree',
-        tooltip: 'Toggle to Tree View',
-        iconClass: 'codicon codicon-list-tree',
-        label: 'Toggle to Tree View',
+        tooltip: nls.localizeByDefault('View as Tree'),
+        iconClass: codicon('list-tree'),
+        originalLabel: 'View as Tree',
+        label: nls.localizeByDefault('View as Tree')
     };
     export const LIST_VIEW_MODE = {
         id: 'scm.viewmode.list',
-        tooltip: 'Toggle to List View',
-        iconClass: 'codicon codicon-list-flat',
-        label: 'Toggle to List View',
+        tooltip: nls.localizeByDefault('View as List'),
+        iconClass: codicon('list-flat'),
+        originalLabel: 'View as List',
+        label: nls.localizeByDefault('View as List')
     };
     export const COLLAPSE_ALL = {
         id: 'scm.collapseAll',
         category: 'SCM',
-        tooltip: 'Collapse All',
-        iconClass: 'codicon codicon-collapse-all',
-        label: 'Collapse All',
+        tooltip: nls.localizeByDefault('Collapse All'),
+        iconClass: codicon('collapse-all'),
+        label: nls.localizeByDefault('Collapse All'),
+        originalLabel: 'Collapse All'
     };
 }
 
@@ -87,12 +90,12 @@ export class ScmContribution extends AbstractViewContribution<ScmWidget> impleme
 
     @inject(StatusBar) protected readonly statusBar: StatusBar;
     @inject(ScmService) protected readonly scmService: ScmService;
-    @inject(QuickOpenService) protected readonly quickOpenService: QuickOpenService;
     @inject(ScmQuickOpenService) protected readonly scmQuickOpenService: ScmQuickOpenService;
     @inject(LabelProvider) protected readonly labelProvider: LabelProvider;
     @inject(CommandService) protected readonly commands: CommandService;
     @inject(CommandRegistry) protected readonly commandRegistry: CommandRegistry;
     @inject(ContextKeyService) protected readonly contextKeys: ContextKeyService;
+    @inject(ScmDecorationsService) protected readonly scmDecorationsService: ScmDecorationsService;
 
     protected scmFocus: ContextKey<boolean>;
 
@@ -100,7 +103,7 @@ export class ScmContribution extends AbstractViewContribution<ScmWidget> impleme
         super({
             viewContainerId: SCM_VIEW_CONTAINER_ID,
             widgetId: SCM_WIDGET_FACTORY_ID,
-            widgetName: 'Source Control',
+            widgetName: SCM_VIEW_CONTAINER_TITLE_OPTIONS.label,
             defaultWidgetOptions: {
                 area: 'left',
                 rank: 300
@@ -128,7 +131,7 @@ export class ScmContribution extends AbstractViewContribution<ScmWidget> impleme
         this.labelProvider.onDidChange(() => this.updateStatusBar());
 
         this.updateContextKeys();
-        this.shell.currentChanged.connect(() => this.updateContextKeys());
+        this.shell.onDidChangeCurrentWidget(() => this.updateContextKeys());
     }
 
     protected updateContextKeys(): void {
@@ -149,16 +152,6 @@ export class ScmContribution extends AbstractViewContribution<ScmWidget> impleme
 
     registerToolbarItems(registry: TabBarToolbarRegistry): void {
         const viewModeEmitter = new Emitter<void>();
-        /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-        const extractScmWidget = (widget: any) => {
-            if (widget instanceof ViewContainer) {
-                const layout = widget.containerLayout;
-                const scmWidgetPart = find(layout.iter(), part => part.wrapped instanceof ScmWidget);
-                if (scmWidgetPart && scmWidgetPart.wrapped instanceof ScmWidget) {
-                    return scmWidgetPart.wrapped;
-                }
-            }
-        };
         const registerToggleViewItem = (command: Command, mode: 'tree' | 'list') => {
             const id = command.id;
             const item: TabBarToolbarItem = {
@@ -169,17 +162,15 @@ export class ScmContribution extends AbstractViewContribution<ScmWidget> impleme
             };
             this.commandRegistry.registerCommand({ id, iconClass: command && command.iconClass }, {
                 execute: widget => {
-                    const scmWidget = extractScmWidget(widget);
-                    if (scmWidget) {
-                        scmWidget.viewMode = mode;
+                    if (widget instanceof ScmWidget) {
+                        widget.viewMode = mode;
                         viewModeEmitter.fire();
                     }
                 },
                 isVisible: widget => {
-                    const scmWidget = extractScmWidget(widget);
-                    if (scmWidget) {
+                    if (widget instanceof ScmWidget) {
                         return !!this.scmService.selectedRepository
-                            && scmWidget.viewMode !== mode;
+                            && widget.viewMode !== mode;
                     }
                     return false;
                 },
@@ -191,15 +182,13 @@ export class ScmContribution extends AbstractViewContribution<ScmWidget> impleme
 
         this.commandRegistry.registerCommand(SCM_COMMANDS.COLLAPSE_ALL, {
             execute: widget => {
-                const scmWidget = extractScmWidget(widget);
-                if (scmWidget && scmWidget.viewMode === 'tree') {
-                    scmWidget.collapseScmTree();
+                if (widget instanceof ScmWidget && widget.viewMode === 'tree') {
+                    widget.collapseScmTree();
                 }
             },
             isVisible: widget => {
-                const scmWidget = extractScmWidget(widget);
-                if (scmWidget) {
-                    return !!this.scmService.selectedRepository && scmWidget.viewMode === 'tree';
+                if (widget instanceof ScmWidget) {
+                    return !!this.scmService.selectedRepository && widget.viewMode === 'tree';
                 }
                 return false;
             }

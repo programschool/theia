@@ -28,9 +28,11 @@ import {
     TreeProps,
     TreeExpansionService,
     ApplicationShell,
-    DiffUris
+    DiffUris,
+    TREE_NODE_INFO_CLASS,
+    codicon
 } from '@theia/core/lib/browser';
-import { CancellationTokenSource, Emitter, Event } from '@theia/core';
+import { CancellationTokenSource, Emitter, Event, ProgressService } from '@theia/core';
 import {
     EditorManager, EditorDecoration, TrackedRangeStickiness, OverviewRulerLane,
     EditorWidget, ReplaceOperation, EditorOpenerOptions, FindMatch
@@ -40,15 +42,15 @@ import { FileResourceResolver, FileSystemPreferences } from '@theia/filesystem/l
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { SearchInWorkspaceResult, SearchInWorkspaceOptions, SearchMatch } from '../common/search-in-workspace-interface';
 import { SearchInWorkspaceService } from './search-in-workspace-service';
-import { MEMORY_TEXT } from './in-memory-text-resource';
+import { MEMORY_TEXT } from '@theia/core/lib/common';
 import URI from '@theia/core/lib/common/uri';
 import * as React from '@theia/core/shared/react';
 import { SearchInWorkspacePreferences } from './search-in-workspace-preferences';
-import { ProgressService } from '@theia/core';
 import { ColorRegistry } from '@theia/core/lib/browser/color-registry';
 import * as minimatch from 'minimatch';
 import { DisposableCollection } from '@theia/core/lib/common/disposable';
 import debounce = require('@theia/core/shared/lodash.debounce');
+import { nls } from '@theia/core/lib/common/nls';
 
 const ROOT_ID = 'ResultTree';
 
@@ -120,7 +122,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     protected readonly toDisposeOnActiveEditorChanged = new DisposableCollection();
 
     // The default root name to add external search results in the case that a workspace is opened.
-    protected readonly defaultRootName = 'Other files';
+    protected readonly defaultRootName = nls.localize('theia/searchResultsView/searchFolderMatch.other.label', 'Other files');
     protected forceVisibleRootNode = false;
 
     protected appliedDecorations = new Map<string, string[]>();
@@ -128,6 +130,10 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     cancelIndicator?: CancellationTokenSource;
 
     protected changeEmitter = new Emitter<Map<string, SearchInWorkspaceRootFolderNode>>();
+
+    protected onExpansionChangedEmitter = new Emitter();
+    readonly onExpansionChanged: Event<void> = this.onExpansionChangedEmitter.event;
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     protected focusInputEmitter = new Emitter<any>();
 
@@ -202,6 +208,10 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
                 this.model.refresh();
             }
         }));
+
+        this.toDispose.push(this.model.onExpansionChanged(() => {
+            this.onExpansionChangedEmitter.fire(undefined);
+        }));
     }
 
     get fileNumber(): number {
@@ -222,6 +232,10 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
         this.update();
     }
 
+    get isReplacing(): boolean {
+        return this._replaceTerm !== '' && this._showReplaceButtons;
+    }
+
     get onChange(): Event<Map<string, SearchInWorkspaceRootFolderNode>> {
         return this.changeEmitter.event;
     }
@@ -231,12 +245,36 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     }
 
     collapseAll(): void {
-        this.resultTree.forEach(rootFolderNode => {
-            rootFolderNode.children.forEach(fileNode => this.expansionService.collapseNode(fileNode));
+        for (const rootFolderNode of this.resultTree.values()) {
+            for (const fileNode of rootFolderNode.children) {
+                this.expansionService.collapseNode(fileNode);
+            }
             if (rootFolderNode.visible) {
                 this.expansionService.collapseNode(rootFolderNode);
             }
-        });
+        }
+    }
+
+    expandAll(): void {
+        for (const rootFolderNode of this.resultTree.values()) {
+            for (const fileNode of rootFolderNode.children) {
+                this.expansionService.expandNode(fileNode);
+            }
+            if (rootFolderNode.visible) {
+                this.expansionService.expandNode(rootFolderNode);
+            }
+        }
+    }
+
+    areResultsCollapsed(): boolean {
+        for (const rootFolderNode of this.resultTree.values()) {
+            for (const fileNode of rootFolderNode.children) {
+                if (!ExpandableTreeNode.isCollapsed(fileNode)) {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /**
@@ -279,18 +317,18 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
      * @param pattern the pattern to be converted.
      */
     protected convertPatternToGlob(workspaceRootUri: URI | undefined, pattern: string): string {
-        // The leading to make the pattern matches in all directories.
-        const globalPrefix = '**/';
-        if (pattern.startsWith(globalPrefix)) {
+        if (pattern.startsWith('**/')) {
             return pattern;
         }
         if (pattern.startsWith('./')) {
             if (workspaceRootUri === undefined) {
                 return pattern;
             }
-            return workspaceRootUri.toString().concat(pattern.replace('./', '/'));
+            return workspaceRootUri.toString() + pattern.replace('./', '/');
         }
-        return globalPrefix.concat(pattern);
+        return pattern.startsWith('/')
+            ? '**' + pattern
+            : '**/' + pattern;
     }
 
     /**
@@ -517,13 +555,8 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
 
         // Exclude files already covered by searching open editors.
         this.editorManager.all.forEach(e => {
-            const rootUri = this.workspaceService.getWorkspaceRootUri(e.editor.uri);
-            if (rootUri) {
-                // Exclude pattern beginning with './' works after the fix of #8469.
-                const { name, path } = this.filenameAndPath(e.editor.uri.toString(), rootUri.toString());
-                const excludePath: string = path === '' ? './' + name : path + '/' + name;
-                searchOptions.exclude = (searchOptions.exclude) ? searchOptions.exclude.concat(excludePath) : [excludePath];
-            }
+            const excludePath: string = e.editor.uri.path.toString();
+            searchOptions.exclude = searchOptions.exclude ? searchOptions.exclude.concat(excludePath) : [excludePath];
         });
 
         // Reduce `maxResults` due to editor results.
@@ -706,7 +739,10 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
         const isResultLineNode = SearchInWorkspaceResultLineNode.is(node);
         return <span className={isResultLineNode ? 'replace-result' : 'replace-all-result'}
             onClick={e => this.doReplace(node, e)}
-            title={isResultLineNode ? 'Replace' : 'Replace All'}></span>;
+            title={isResultLineNode
+                ? nls.localizeByDefault('Replace')
+                : nls.localizeByDefault('Replace All')
+            }></span>;
     }
 
     protected getFileCount(node: TreeNode): number {
@@ -749,12 +785,50 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     }
 
     protected confirmReplaceAll(resultNumber: number, fileNumber: number): Promise<boolean | undefined> {
-        const go = fileNumber > 1;
         return new ConfirmDialog({
-            title: 'Replace all',
-            msg: `Do you really want to replace ${resultNumber} match${resultNumber > 1 ? 'es' : ''} ${go ? 'across' : 'in'} `
-                + `${fileNumber} file${go ? 's' : ''} with "${this._replaceTerm}"?`
+            title: nls.localizeByDefault('Replace All'),
+            msg: this.buildReplaceAllConfirmationMessage(resultNumber, fileNumber, this._replaceTerm)
         }).open();
+    }
+
+    protected buildReplaceAllConfirmationMessage(occurrences: number, fileCount: number, replaceValue: string): string {
+        if (occurrences === 1) {
+            if (fileCount === 1) {
+                if (replaceValue) {
+                    return nls.localizeByDefault(
+                        "Replace {0} occurrence across {1} file with '{2}'?", occurrences, fileCount, replaceValue);
+                }
+
+                return nls.localizeByDefault(
+                    'Replace {0} occurrence across {1} file?', occurrences, fileCount);
+            }
+
+            if (replaceValue) {
+                return nls.localizeByDefault(
+                    "Replace {0} occurrence across {1} files with '{2}'?", occurrences, fileCount, replaceValue);
+            }
+
+            return nls.localizeByDefault(
+                'Replace {0} occurrence across {1} files?', occurrences, fileCount);
+        }
+
+        if (fileCount === 1) {
+            if (replaceValue) {
+                return nls.localizeByDefault(
+                    "Replace {0} occurrences across {1} file with '{2}'?", occurrences, fileCount, replaceValue);
+            }
+
+            return nls.localizeByDefault(
+                'Replace {0} occurrences across {1} file?', occurrences, fileCount);
+        }
+
+        if (replaceValue) {
+            return nls.localizeByDefault(
+                "Replace {0} occurrences across {1} files with '{2}'?", occurrences, fileCount, replaceValue);
+        }
+
+        return nls.localizeByDefault(
+            'Replace {0} occurrences across {1} files?', occurrences, fileCount);
     }
 
     protected updateRightResults(node: SearchInWorkspaceResultLineNode): void {
@@ -822,7 +896,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     }
 
     protected renderRemoveButton(node: TreeNode): React.ReactNode {
-        return <span className='remove-node' onClick={e => this.remove(node, e)} title='Dismiss'></span>;
+        return <span className={codicon('close')} onClick={e => this.remove(node, e)} title='Dismiss'></span>;
     }
 
     protected removeNode(node: TreeNode): void {
@@ -877,7 +951,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
                             {this.toNodeName(node)}
                         </span>
                         {node.path !== '/' + this.defaultRootName &&
-                            <span className={'file-path'}>
+                            <span className={'file-path ' + TREE_NODE_INFO_CLASS}>
                                 {node.path}
                             </span>
                         }
@@ -902,7 +976,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
                         <span className={'file-name'}>
                             {this.toNodeName(node)}
                         </span>
-                        <span className={'file-path'}>
+                        <span className={'file-path ' + TREE_NODE_INFO_CLASS}>
                             {node.path}
                         </span>
                     </div>
@@ -930,7 +1004,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
             after = node.lineText.text.substr(node.lineText.character + node.length);
             title = node.lineText.text.trim();
         }
-        return <div className={`resultLine noWrapInfo ${node.selected ? 'selected' : ''}`} title={title}>
+        return <div className={`resultLine noWrapInfo noselect ${node.selected ? 'selected' : ''}`} title={title}>
             {this.searchInWorkspacePreferences['search.lineNumbers'] && <span className='theia-siw-lineNumber'>{node.line}</span>}
             <span>
                 {before}
@@ -943,8 +1017,8 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     }
 
     protected renderMatchLinePart(node: SearchInWorkspaceResultLineNode): React.ReactNode {
-        const replaceTerm = this._replaceTerm !== '' && this._showReplaceButtons ? <span className='replace-term'>{this._replaceTerm}</span> : '';
-        const className = `match${this._showReplaceButtons ? ' strike-through' : ''}`;
+        const replaceTerm = this.isReplacing ? <span className='replace-term'>{this._replaceTerm}</span> : '';
+        const className = `match${this.isReplacing ? ' strike-through' : ''}`;
         const match = typeof node.lineText === 'string' ?
             node.lineText.substr(node.character - 1, node.length)
             : node.lineText.text.substr(node.lineText.character - 1, node.length);
@@ -968,7 +1042,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     protected async doOpen(node: SearchInWorkspaceResultLineNode, preview: boolean = false): Promise<EditorWidget> {
         let fileUri: URI;
         const resultNode = node.parent;
-        if (resultNode && this._showReplaceButtons && preview) {
+        if (resultNode && this.isReplacing && preview) {
             const leftUri = new URI(node.fileUri);
             const rightUri = await this.createReplacePreview(resultNode);
             fileUri = DiffUris.encode(leftUri, rightUri);
@@ -976,7 +1050,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
             fileUri = new URI(node.fileUri);
         }
 
-        const opts: EditorOpenerOptions | undefined = !DiffUris.isDiffUri(fileUri) ? {
+        const opts: EditorOpenerOptions = {
             selection: {
                 start: {
                     line: node.line - 1,
@@ -988,7 +1062,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
                 }
             },
             mode: 'reveal'
-        } : undefined;
+        };
 
         const editorWidget = await this.editorManager.open(fileUri, opts);
 
@@ -1075,7 +1149,7 @@ export class SearchInWorkspaceResultTreeWidget extends TreeWidget {
     protected getExcludeGlobs(excludeOptions?: string[]): string[] {
         const excludePreferences = this.filesystemPreferences['files.exclude'];
         const excludePreferencesGlobs = Object.keys(excludePreferences).filter(key => !!excludePreferences[key]);
-        return [...new Set([...excludePreferencesGlobs, ...excludeOptions])];
+        return [...new Set([...excludePreferencesGlobs, ...excludeOptions || []])];
     }
 
     /**

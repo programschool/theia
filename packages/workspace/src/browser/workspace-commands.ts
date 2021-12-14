@@ -14,15 +14,16 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { inject, injectable } from '@theia/core/shared/inversify';
+import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import URI from '@theia/core/lib/common/uri';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
+import { ApplicationServer } from '@theia/core/lib/common/application-protocol';
 import { Command, CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
 import { MenuContribution, MenuModelRegistry } from '@theia/core/lib/common/menu';
 import { CommonMenus } from '@theia/core/lib/browser/common-frontend-contribution';
 import { FileDialogService } from '@theia/filesystem/lib/browser';
-import { SingleTextInputDialog, ConfirmDialog } from '@theia/core/lib/browser/dialogs';
-import { OpenerService, OpenHandler, open, FrontendApplication, LabelProvider } from '@theia/core/lib/browser';
+import { SingleTextInputDialog, ConfirmDialog, Dialog } from '@theia/core/lib/browser/dialogs';
+import { OpenerService, OpenHandler, open, FrontendApplication, LabelProvider, CommonCommands } from '@theia/core/lib/browser';
 import { UriCommandHandler, UriAwareCommandHandler } from '@theia/core/lib/common/uri-command-handler';
 import { WorkspaceService } from './workspace-service';
 import { MessageService } from '@theia/core/lib/common/message-service';
@@ -34,111 +35,122 @@ import { WorkspaceCompareHandler } from './workspace-compare-handler';
 import { FileDownloadCommands } from '@theia/filesystem/lib/browser/download/file-download-command-contribution';
 import { FileSystemCommands } from '@theia/filesystem/lib/browser/filesystem-frontend-contribution';
 import { WorkspaceInputDialog } from './workspace-input-dialog';
-import { Emitter, Event } from '@theia/core/lib/common';
+import { Emitter, Event, isWindows, OS } from '@theia/core/lib/common';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { FileStat } from '@theia/filesystem/lib/common/files';
+import { nls } from '@theia/core/lib/common/nls';
+import { ClipboardService } from '@theia/core/lib/browser/clipboard-service';
 
 const validFilename: (arg: string) => boolean = require('valid-filename');
 
 export namespace WorkspaceCommands {
 
-    const WORKSPACE_CATEGORY = 'Workspace';
-    const FILE_CATEGORY = 'File';
+    const WORKSPACE_CATEGORY = 'Workspaces';
+    const FILE_CATEGORY = CommonCommands.FILE_CATEGORY;
 
     // On Linux and Windows, both files and folders cannot be opened at the same time in electron.
     // `OPEN_FILE` and `OPEN_FOLDER` must be available only on Linux and Windows in electron.
     // `OPEN` must *not* be available on Windows and Linux in electron.
     // VS Code does the same. See: https://github.com/eclipse-theia/theia/pull/3202#issuecomment-430585357
     export const OPEN: Command & { dialogLabel: string } = {
-        id: 'workspace:open',
-        category: FILE_CATEGORY,
-        label: 'Open...',
-        dialogLabel: 'Open'
+        ...Command.toDefaultLocalizedCommand({
+            id: 'workspace:open',
+            category: CommonCommands.FILE_CATEGORY,
+            label: 'Open...'
+        }),
+        dialogLabel: nls.localizeByDefault('Open')
     };
     // No `label`. Otherwise, it shows up in the `Command Palette`.
     export const OPEN_FILE: Command & { dialogLabel: string } = {
         id: 'workspace:openFile',
-        category: FILE_CATEGORY,
+        originalCategory: FILE_CATEGORY,
+        category: nls.localizeByDefault(CommonCommands.FILE_CATEGORY),
         dialogLabel: 'Open File'
     };
     export const OPEN_FOLDER: Command & { dialogLabel: string } = {
         id: 'workspace:openFolder',
-        dialogLabel: 'Open Folder' // No `label`. Otherwise, it shows up in the `Command Palette`.
+        dialogLabel: nls.localizeByDefault('Open Folder') // No `label`. Otherwise, it shows up in the `Command Palette`.
     };
     export const OPEN_WORKSPACE: Command & { dialogLabel: string } = {
-        id: 'workspace:openWorkspace',
-        category: FILE_CATEGORY,
-        label: 'Open Workspace...',
-        dialogLabel: 'Open Workspace'
+        ...Command.toDefaultLocalizedCommand({
+            id: 'workspace:openWorkspace',
+            category: CommonCommands.FILE_CATEGORY,
+            label: 'Open Workspace...',
+        }),
+        dialogLabel: nls.localizeByDefault('Open Workspace')
     };
-    export const OPEN_RECENT_WORKSPACE: Command = {
+    export const OPEN_RECENT_WORKSPACE = Command.toLocalizedCommand({
         id: 'workspace:openRecent',
         category: FILE_CATEGORY,
         label: 'Open Recent Workspace...'
-    };
-    export const CLOSE: Command = {
+    }, 'theia/workspace/openRecentWorkspace', CommonCommands.FILE_CATEGORY_KEY);
+    export const CLOSE = Command.toDefaultLocalizedCommand({
         id: 'workspace:close',
         category: WORKSPACE_CATEGORY,
         label: 'Close Workspace'
-    };
-    export const NEW_FILE: Command = {
+    });
+    export const NEW_FILE = Command.toDefaultLocalizedCommand({
         id: 'file.newFile',
         category: FILE_CATEGORY,
         label: 'New File'
-    };
-    export const NEW_FOLDER: Command = {
+    });
+    export const NEW_FOLDER = Command.toDefaultLocalizedCommand({
         id: 'file.newFolder',
         category: FILE_CATEGORY,
         label: 'New Folder'
-    };
+    });
     export const FILE_OPEN_WITH = (opener: OpenHandler): Command => ({
         id: `file.openWith.${opener.id}`
     });
-    export const FILE_RENAME: Command = {
+    export const FILE_RENAME = Command.toDefaultLocalizedCommand({
         id: 'file.rename',
         category: FILE_CATEGORY,
         label: 'Rename'
-    };
-    export const FILE_DELETE: Command = {
+    });
+    export const FILE_DELETE = Command.toDefaultLocalizedCommand({
         id: 'file.delete',
         category: FILE_CATEGORY,
         label: 'Delete'
-    };
-    export const FILE_DUPLICATE: Command = {
+    });
+    export const FILE_DUPLICATE = Command.toLocalizedCommand({
         id: 'file.duplicate',
         category: FILE_CATEGORY,
         label: 'Duplicate'
-    };
-    export const FILE_COMPARE: Command = {
+    }, 'theia/workspace/duplicate', CommonCommands.FILE_CATEGORY_KEY);
+    export const FILE_COMPARE = Command.toLocalizedCommand({
         id: 'file.compare',
         category: FILE_CATEGORY,
         label: 'Compare with Each Other'
-    };
-    export const ADD_FOLDER: Command = {
+    }, 'theia/workspace/compareWithEachOther', CommonCommands.FILE_CATEGORY_KEY);
+    export const ADD_FOLDER = Command.toDefaultLocalizedCommand({
         id: 'workspace:addFolder',
         category: WORKSPACE_CATEGORY,
         label: 'Add Folder to Workspace...'
-    };
-    export const REMOVE_FOLDER: Command = {
+    });
+    export const REMOVE_FOLDER = Command.toDefaultLocalizedCommand({
         id: 'workspace:removeFolder',
         category: WORKSPACE_CATEGORY,
         label: 'Remove Folder from Workspace'
-    };
-    export const SAVE_WORKSPACE_AS: Command = {
+    });
+    export const SAVE_WORKSPACE_AS = Command.toDefaultLocalizedCommand({
         id: 'workspace:saveAs',
         category: WORKSPACE_CATEGORY,
         label: 'Save Workspace As...'
-    };
-    export const OPEN_WORKSPACE_FILE: Command = {
+    });
+    export const OPEN_WORKSPACE_FILE = Command.toDefaultLocalizedCommand({
         id: 'workspace:openConfigFile',
         category: WORKSPACE_CATEGORY,
         label: 'Open Workspace Configuration File'
-    };
-    export const SAVE_AS: Command = {
+    });
+    export const SAVE_AS = Command.toDefaultLocalizedCommand({
         id: 'file.saveAs',
-        category: 'File',
+        category: CommonCommands.FILE_CATEGORY,
         label: 'Save As...',
-    };
+    });
+    export const COPY_RELATIVE_FILE_PATH = Command.toDefaultLocalizedCommand({
+        id: 'navigator.copyRelativeFilePath',
+        label: 'Copy Relative Path'
+    });
 }
 
 @injectable()
@@ -146,10 +158,12 @@ export class FileMenuContribution implements MenuContribution {
 
     registerMenus(registry: MenuModelRegistry): void {
         registry.registerMenuAction(CommonMenus.FILE_NEW, {
-            commandId: WorkspaceCommands.NEW_FILE.id
+            commandId: WorkspaceCommands.NEW_FILE.id,
+            order: 'a'
         });
         registry.registerMenuAction(CommonMenus.FILE_NEW, {
-            commandId: WorkspaceCommands.NEW_FOLDER.id
+            commandId: WorkspaceCommands.NEW_FOLDER.id,
+            order: 'b'
         });
         const downloadUploadMenu = [...CommonMenus.FILE, '4_downloadupload'];
         registry.registerMenuAction(downloadUploadMenu, {
@@ -196,9 +210,18 @@ export class WorkspaceCommandContribution implements CommandContribution {
     @inject(WorkspaceDeleteHandler) protected readonly deleteHandler: WorkspaceDeleteHandler;
     @inject(WorkspaceDuplicateHandler) protected readonly duplicateHandler: WorkspaceDuplicateHandler;
     @inject(WorkspaceCompareHandler) protected readonly compareHandler: WorkspaceCompareHandler;
+    @inject(ApplicationServer) protected readonly applicationServer: ApplicationServer;
+    @inject(ClipboardService) protected readonly clipboardService: ClipboardService;
 
     private readonly onDidCreateNewFileEmitter = new Emitter<DidCreateNewResourceEvent>();
     private readonly onDidCreateNewFolderEmitter = new Emitter<DidCreateNewResourceEvent>();
+
+    protected backendOS: Promise<OS.Type>;
+
+    @postConstruct()
+    async init(): Promise<void> {
+        this.backendOS = this.applicationServer.getBackendOS();
+    };
 
     get onDidCreateNewFile(): Event<DidCreateNewResourceEvent> {
         return this.onDidCreateNewFileEmitter.event;
@@ -226,7 +249,7 @@ export class WorkspaceCommandContribution implements CommandContribution {
                     const vacantChildUri = FileSystemUtils.generateUniqueResourceURI(parentUri, parent, fileName, fileExtension);
 
                     const dialog = new WorkspaceInputDialog({
-                        title: 'New File',
+                        title: nls.localizeByDefault('New File'),
                         parentUri: parentUri,
                         initialValue: vacantChildUri.path.base,
                         validate: name => this.validateFileName(name, parent, true)
@@ -249,7 +272,7 @@ export class WorkspaceCommandContribution implements CommandContribution {
                     const parentUri = parent.resource;
                     const vacantChildUri = FileSystemUtils.generateUniqueResourceURI(parentUri, parent, 'Untitled');
                     const dialog = new WorkspaceInputDialog({
-                        title: 'New Folder',
+                        title: nls.localizeByDefault('New Folder'),
                         parentUri: parentUri,
                         initialValue: vacantChildUri.path.base,
                         validate: name => this.validateFileName(name, parent, true)
@@ -271,22 +294,19 @@ export class WorkspaceCommandContribution implements CommandContribution {
                 uris.forEach(async uri => {
                     const parent = await this.getParent(uri);
                     if (parent) {
-                        const initialValue = uri.path.base;
-                        const stat = await this.fileService.resolve(uri);
-                        const fileType = stat.isDirectory ? 'Directory' : 'File';
-                        const titleStr = `Rename ${fileType}`;
+                        const oldName = uri.path.base;
                         const dialog = new SingleTextInputDialog({
-                            title: titleStr,
-                            initialValue,
+                            title: nls.localizeByDefault('Rename'),
+                            initialValue: oldName,
                             initialSelectionRange: {
                                 start: 0,
                                 end: uri.path.name.length
                             },
-                            validate: (name, mode) => {
-                                if (initialValue === name && mode === 'preview') {
+                            validate: async (newName, mode) => {
+                                if (oldName === newName && mode === 'preview') {
                                     return false;
                                 }
-                                return this.validateFileName(name, parent, false);
+                                return this.validateFileRename(oldName, newName, parent);
                             }
                         });
                         const fileName = await dialog.open();
@@ -302,28 +322,45 @@ export class WorkspaceCommandContribution implements CommandContribution {
         registry.registerCommand(WorkspaceCommands.FILE_DUPLICATE, this.newMultiUriAwareCommandHandler(this.duplicateHandler));
         registry.registerCommand(WorkspaceCommands.FILE_DELETE, this.newMultiUriAwareCommandHandler(this.deleteHandler));
         registry.registerCommand(WorkspaceCommands.FILE_COMPARE, this.newMultiUriAwareCommandHandler(this.compareHandler));
+        registry.registerCommand(WorkspaceCommands.COPY_RELATIVE_FILE_PATH, UriAwareCommandHandler.MultiSelect(this.selectionService, {
+            isEnabled: uris => !!uris.length,
+            isVisible: uris => !!uris.length,
+            execute: async uris => {
+                const lineDelimiter = isWindows ? '\r\n' : '\n';
+                const text = uris.map((uri: URI) => {
+                    const workspaceRoot = this.workspaceService.getWorkspaceRootUri(uri);
+                    if (workspaceRoot) {
+                        return workspaceRoot.relative(uri);
+                    }
+                }).join(lineDelimiter);
+                await this.clipboardService.writeText(text);
+            }
+        }));
         this.preferences.ready.then(() => {
             registry.registerCommand(WorkspaceCommands.ADD_FOLDER, {
                 isEnabled: () => this.workspaceService.isMultiRootWorkspaceEnabled,
                 isVisible: () => this.workspaceService.isMultiRootWorkspaceEnabled,
                 execute: async () => {
-                    const uri = await this.fileDialogService.showOpenDialog({
+                    const selection = await this.fileDialogService.showOpenDialog({
                         title: WorkspaceCommands.ADD_FOLDER.label!,
                         canSelectFiles: false,
-                        canSelectFolders: true
+                        canSelectFolders: true,
+                        canSelectMany: true,
                     });
-                    if (!uri) {
+                    if (!selection) {
                         return;
                     }
+                    const uris = Array.isArray(selection) ? selection : [selection];
                     const workspaceSavedBeforeAdding = this.workspaceService.saved;
-                    await this.addFolderToWorkspace(uri);
+                    await this.addFolderToWorkspace(...uris);
                     if (!workspaceSavedBeforeAdding) {
                         const saveCommand = registry.getCommand(WorkspaceCommands.SAVE_WORKSPACE_AS.id);
                         if (saveCommand && await new ConfirmDialog({
-                            title: 'Folder added to Workspace',
-                            msg: 'A workspace with multiple roots was created. Do you want to save your workspace configuration as a file?',
-                            ok: 'Yes',
-                            cancel: 'No'
+                            title: nls.localize('theia/workspace/workspaceFolderAddedTitle', 'Folder added to Workspace'),
+                            msg: nls.localize('theia/workspace/workspaceFolderAdded',
+                                'A workspace with multiple roots was created. Do you want to save your workspace configuration as a file?'),
+                            ok: Dialog.YES,
+                            cancel: Dialog.NO
                         }).open()) {
                             registry.executeCommand(saveCommand.id);
                         }
@@ -368,34 +405,44 @@ export class WorkspaceCommandContribution implements CommandContribution {
         return new WorkspaceRootUriAwareCommandHandler(this.workspaceService, this.selectionService, handler);
     }
 
+    protected async validateFileRename(oldName: string, newName: string, parent: FileStat): Promise<string> {
+        if (
+            await this.backendOS === OS.Type.Windows
+            && parent.resource.resolve(newName).isEqual(parent.resource.resolve(oldName), false)
+        ) {
+            return '';
+        }
+        return this.validateFileName(newName, parent, false);
+    }
+
     /**
      * Returns an error message if the file name is invalid. Otherwise, an empty string.
      *
      * @param name the simple file name of the file to validate.
      * @param parent the parent directory's file stat.
-     * @param recursive allow file or folder creation using recursive path
+     * @param allowNested allow file or folder creation using recursive path
      */
-    protected async validateFileName(name: string, parent: FileStat, recursive: boolean = false): Promise<string> {
+    protected async validateFileName(name: string, parent: FileStat, allowNested: boolean = false): Promise<string> {
         if (!name) {
             return '';
         }
         // do not allow recursive rename
-        if (!recursive && !validFilename(name)) {
-            return 'Invalid file or folder name';
+        if (!allowNested && !validFilename(name)) {
+            return nls.localizeByDefault('Invalid file or folder name');
         }
         if (name.startsWith('/')) {
-            return 'Absolute paths or names that starts with / are not allowed';
+            return nls.localizeByDefault('Absolute paths or names that starts with / are not allowed');
         } else if (name.startsWith(' ') || name.endsWith(' ')) {
-            return 'Names with leading or trailing whitespaces are not allowed';
+            return nls.localizeByDefault('Names with leading or trailing whitespaces are not allowed');
         }
         // check and validate each sub-paths
         if (name.split(/[\\/]/).some(file => !file || !validFilename(file) || /^\s+$/.test(file))) {
-            return `The name "${this.trimFileName(name)}" is not a valid file or folder name.`;
+            return nls.localizeByDefault('The name "{0}" is not a valid file or folder name.', this.trimFileName(name));
         }
         const childUri = parent.resource.resolve(name);
         const exists = await this.fileService.exists(childUri);
         if (exists) {
-            return `A file or folder "${this.trimFileName(name)}" already exists at this location.`;
+            return nls.localizeByDefault('A file or folder "{0}" already exists at this location.', this.trimFileName(name));
         }
         return '';
     }
@@ -426,13 +473,17 @@ export class WorkspaceCommandContribution implements CommandContribution {
         }
     }
 
-    protected async addFolderToWorkspace(uri: URI | undefined): Promise<void> {
-        if (uri) {
+    protected async addFolderToWorkspace(...uris: URI[]): Promise<void> {
+        if (uris.length) {
+            const foldersToAdd = [];
             try {
-                const stat = await this.fileService.resolve(uri);
-                if (stat.isDirectory) {
-                    await this.workspaceService.addRoot(uri);
+                for (const uri of uris) {
+                    const stat = await this.fileService.resolve(uri);
+                    if (stat.isDirectory) {
+                        foldersToAdd.push(uri);
+                    }
                 }
+                await this.workspaceService.addRoot(foldersToAdd);
             } catch { }
         }
     }
@@ -462,8 +513,9 @@ export class WorkspaceCommandContribution implements CommandContribution {
         const toRemove = uris.filter(uri => roots.has(uri.toString()));
         if (toRemove.length > 0) {
             const messageContainer = document.createElement('div');
-            messageContainer.textContent = `Are you sure you want to remove the following folder${toRemove.length > 1 ? 's' : ''} from the workspace?`;
-            messageContainer.title = 'Note: Nothing will be erased from disk';
+            messageContainer.textContent = nls.localize(`theia/workspace/removeFolder${toRemove.length > 1 ? 's' : ''}`,
+                `Are you sure you want to remove the following folder${toRemove.length > 1 ? 's' : ''} from the workspace?`);
+            messageContainer.title = nls.localize('theia/workspace/noErasure', 'Note: Nothing will be erased from disk');
             const list = document.createElement('div');
             list.classList.add('theia-dialog-node');
             toRemove.forEach(uri => {
@@ -481,7 +533,7 @@ export class WorkspaceCommandContribution implements CommandContribution {
             });
             messageContainer.appendChild(list);
             const dialog = new ConfirmDialog({
-                title: 'Remove Folder from Workspace',
+                title: nls.localizeByDefault('Remove Folder from Workspace'),
                 msg: messageContainer
             });
             if (await dialog.open()) {

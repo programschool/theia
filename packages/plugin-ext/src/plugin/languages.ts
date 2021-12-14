@@ -32,8 +32,7 @@ import { RPCProtocol } from '../common/rpc-protocol';
 import * as theia from '@theia/plugin';
 import { DocumentsExtImpl } from './documents';
 import { PluginModel } from '../common/plugin-protocol';
-import { Disposable } from './types-impl';
-import { URI } from '@theia/core/shared/vscode-uri';
+import { Disposable, URI } from './types-impl';
 import { UriComponents } from '../common/uri-components';
 import {
     CompletionContext,
@@ -60,7 +59,8 @@ import {
     FoldingRange,
     SelectionRange,
     CallHierarchyDefinition,
-    CallHierarchyReference
+    CallHierarchyReference,
+    ChainedCacheId
 } from '../common/plugin-api-rpc-model';
 import { CompletionAdapter } from './languages/completion';
 import { Diagnostics } from './languages/diagnostics';
@@ -90,8 +90,8 @@ import { DeclarationAdapter } from './languages/declaration';
 import { CallHierarchyAdapter } from './languages/call-hierarchy';
 import { BinaryBuffer } from '@theia/core/lib/common/buffer';
 import { DocumentSemanticTokensAdapter, DocumentRangeSemanticTokensAdapter } from './languages/semantic-highlighting';
+import { isReadonlyArray } from '../common/arrays';
 
-/* eslint-disable @typescript-eslint/indent */
 type Adapter = CompletionAdapter |
     SignatureHelpAdapter |
     HoverAdapter |
@@ -116,7 +116,6 @@ type Adapter = CompletionAdapter |
     CallHierarchyAdapter |
     DocumentRangeSemanticTokensAdapter |
     DocumentSemanticTokensAdapter;
-/* eslint-enable @typescript-eslint/indent */
 
 export class LanguagesExtImpl implements LanguagesExt {
 
@@ -200,13 +199,13 @@ export class LanguagesExtImpl implements LanguagesExt {
             return fallbackValue;
         }
         if (adapter instanceof ctor) {
-            return callback(<A>adapter);
+            return callback(adapter);
         }
         throw new Error('no adapter found');
     }
 
     private transformDocumentSelector(selector: theia.DocumentSelector): SerializedDocumentFilter[] {
-        if (Array.isArray(selector)) {
+        if (isReadonlyArray(selector)) {
             return selector.map(sel => this.doTransformDocumentSelector(sel)!);
         }
 
@@ -239,8 +238,8 @@ export class LanguagesExtImpl implements LanguagesExt {
         return this.withAdapter(handle, CompletionAdapter, adapter => adapter.provideCompletionItems(URI.revive(resource), position, context, token), undefined);
     }
 
-    $resolveCompletionItem(handle: number, parentId: number, id: number, token: theia.CancellationToken): Promise<Completion | undefined> {
-        return this.withAdapter(handle, CompletionAdapter, adapter => adapter.resolveCompletionItem(parentId, id, token), undefined);
+    $resolveCompletionItem(handle: number, chainedId: ChainedCacheId, token: theia.CancellationToken): Promise<Completion | undefined> {
+        return this.withAdapter(handle, CompletionAdapter, adapter => adapter.resolveCompletionItem(chainedId, token), undefined);
     }
 
     $releaseCompletionItems(handle: number, id: number): void {
@@ -584,12 +583,18 @@ export class LanguagesExtImpl implements LanguagesExt {
         return this.createDisposable(callId);
     }
 
-    $provideRootDefinition(handle: number, resource: UriComponents, location: Position, token: theia.CancellationToken): Promise<CallHierarchyDefinition | undefined> {
+    $provideRootDefinition(
+        handle: number, resource: UriComponents, location: Position, token: theia.CancellationToken
+    ): Promise<CallHierarchyDefinition | CallHierarchyDefinition[] | undefined> {
         return this.withAdapter(handle, CallHierarchyAdapter, adapter => adapter.provideRootDefinition(URI.revive(resource), location, token), undefined);
     }
 
     $provideCallers(handle: number, definition: CallHierarchyDefinition, token: theia.CancellationToken): Promise<CallHierarchyReference[] | undefined> {
         return this.withAdapter(handle, CallHierarchyAdapter, adapter => adapter.provideCallers(definition, token), undefined);
+    }
+
+    $provideCallees(handle: number, definition: CallHierarchyDefinition, token: theia.CancellationToken): Promise<CallHierarchyReference[] | undefined> {
+        return this.withAdapter(handle, CallHierarchyAdapter, adapter => adapter.provideCallees(definition, token), undefined);
     }
     // ### Call Hierarchy Provider end
 

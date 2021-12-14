@@ -14,31 +14,36 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { MenuModelRegistry, Command, CommandRegistry } from '@theia/core/lib/common';
 import { AbstractViewContribution, OpenViewArguments, KeybindingRegistry } from '@theia/core/lib/browser';
-import { EDITOR_CONTEXT_MENU } from '@theia/editor/lib/browser';
+import { EDITOR_CONTEXT_MENU, CurrentEditorAccess, EditorManager } from '@theia/editor/lib/browser';
 import { CallHierarchyTreeWidget } from './callhierarchy-tree/callhierarchy-tree-widget';
 import { CALLHIERARCHY_ID } from './callhierarchy';
-import { CurrentEditorAccess } from './current-editor-access';
 import { CallHierarchyServiceProvider } from './callhierarchy-service';
 import URI from '@theia/core/lib/common/uri';
+import { ContextKey, ContextKeyService } from '@theia/core/lib/browser/context-key-service';
 
 export const CALL_HIERARCHY_TOGGLE_COMMAND_ID = 'callhierarchy:toggle';
 export const CALL_HIERARCHY_LABEL = 'Call Hierarchy';
 
 export namespace CallHierarchyCommands {
-    export const OPEN: Command = {
+    export const OPEN = Command.toLocalizedCommand({
         id: 'callhierarchy:open',
         label: 'Open Call Hierarchy'
-    };
+    }, 'theia/callhierarchy/open');
 }
 
 @injectable()
 export class CallHierarchyContribution extends AbstractViewContribution<CallHierarchyTreeWidget> {
 
     @inject(CurrentEditorAccess) protected readonly editorAccess: CurrentEditorAccess;
+    @inject(EditorManager) protected readonly editorManager: EditorManager;
     @inject(CallHierarchyServiceProvider) protected readonly callHierarchyServiceProvider: CallHierarchyServiceProvider;
+    @inject(ContextKeyService) protected readonly contextKeyService: ContextKeyService;
+
+    protected editorHasCallHierarchyProvider!: ContextKey<boolean>;
+
     constructor() {
         super({
             widgetId: CALLHIERARCHY_ID,
@@ -51,16 +56,21 @@ export class CallHierarchyContribution extends AbstractViewContribution<CallHier
         });
     }
 
+    @postConstruct()
+    protected init(): void {
+        this.editorHasCallHierarchyProvider = this.contextKeyService.createKey('editorHasCallHierarchyProvider', false);
+        this.editorManager.onCurrentEditorChanged(() => this.editorHasCallHierarchyProvider.set(this.isCallHierarchyAvailable()));
+        this.callHierarchyServiceProvider.onDidChange(() => this.editorHasCallHierarchyProvider.set(this.isCallHierarchyAvailable()));
+    }
+
     protected isCallHierarchyAvailable(): boolean {
-        const selection = this.editorAccess.getSelection();
-        const languageId = this.editorAccess.getLanguageId();
+        const { selection, languageId } = this.editorAccess;
         return !!selection && !!languageId && !!this.callHierarchyServiceProvider.get(languageId, new URI(selection.uri));
     }
 
     async openView(args?: Partial<OpenViewArguments>): Promise<CallHierarchyTreeWidget> {
         const widget = await super.openView(args);
-        const selection = this.editorAccess.getSelection();
-        const languageId = this.editorAccess.getLanguageId();
+        const { selection, languageId } = this.editorAccess;
         widget.initializeModel(selection, languageId);
         return widget;
     }

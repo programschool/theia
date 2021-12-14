@@ -22,6 +22,7 @@ import {
     PreferenceSchema,
     PreferenceContribution
 } from '@theia/core/lib/browser/preferences';
+import { nls } from '@theia/core/lib/common/nls';
 
 export const scmPreferenceSchema: PreferenceSchema = {
     type: 'object',
@@ -30,10 +31,10 @@ export const scmPreferenceSchema: PreferenceSchema = {
             type: 'string',
             enum: ['tree', 'list'],
             enumDescriptions: [
-                'Show the repository changes as a tree.',
-                'Show the repository changes as a list.'
+                nls.localizeByDefault('Show the repository changes as a tree.'),
+                nls.localizeByDefault('Show the repository changes as a list.')
             ],
-            description: 'Controls the default source control view mode.',
+            description: nls.localizeByDefault('Controls the default Source Control repository view mode.'),
             default: 'list'
         }
     }
@@ -43,18 +44,20 @@ export interface ScmConfiguration {
     'scm.defaultViewMode': 'tree' | 'list'
 }
 
+export const ScmPreferenceContribution = Symbol('ScmPreferenceContribution');
 export const ScmPreferences = Symbol('ScmPreferences');
 export type ScmPreferences = PreferenceProxy<ScmConfiguration>;
 
-export function createScmPreferences(preferences: PreferenceService): ScmPreferences {
-    return createPreferenceProxy(preferences, scmPreferenceSchema);
+export function createScmPreferences(preferences: PreferenceService, schema: PreferenceSchema = scmPreferenceSchema): ScmPreferences {
+    return createPreferenceProxy(preferences, schema);
 }
 
 export function bindScmPreferences(bind: interfaces.Bind): void {
     bind(ScmPreferences).toDynamicValue((ctx: interfaces.Context) => {
         const preferences = ctx.container.get<PreferenceService>(PreferenceService);
-        return createScmPreferences(preferences);
+        const contribution = ctx.container.get<PreferenceContribution>(ScmPreferenceContribution);
+        return createScmPreferences(preferences, contribution.schema);
     }).inSingletonScope();
-
-    bind(PreferenceContribution).toConstantValue({ schema: scmPreferenceSchema });
+    bind(ScmPreferenceContribution).toConstantValue({ schema: scmPreferenceSchema });
+    bind(PreferenceContribution).toService(ScmPreferenceContribution);
 }

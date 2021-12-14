@@ -34,7 +34,7 @@ import URI from '@theia/core/lib/common/uri';
 import { timeout, Deferred } from '@theia/core/lib/common/promise-util';
 import { CancellationToken, CancellationTokenSource } from '@theia/core/lib/common/cancellation';
 import { Disposable, DisposableCollection } from '@theia/core/lib/common/disposable';
-import { WaitUntilEvent, Emitter, AsyncEmitter } from '@theia/core/lib/common/event';
+import { WaitUntilEvent, Emitter, AsyncEmitter, Event } from '@theia/core/lib/common/event';
 import { ContributionProvider } from '@theia/core/lib/common/contribution-provider';
 import { TernarySearchTree } from '@theia/core/lib/common/ternary-search-tree';
 import {
@@ -1120,7 +1120,7 @@ export class FileService {
         // if target exists get valid target
         if (exists && !overwrite) {
             const parent = await this.resolve(target.parent);
-            const name = target.path.name + '_copy';
+            const name = isSameResourceWithDifferentPathCase ? target.path.name : target.path.name + '_copy';
             target = FileSystemUtils.generateUniqueResourceURI(target.parent, parent, name, target.path.ext);
         }
 
@@ -1252,7 +1252,11 @@ export class FileService {
         return { exists, isSameResourceWithDifferentPathCase };
     }
 
-    async createFolder(resource: URI): Promise<FileStatWithMetadata> {
+    async createFolder(resource: URI, options: FileOperationOptions = {}): Promise<FileStatWithMetadata> {
+        const {
+            fromUserGesture = true,
+        } = options;
+
         const provider = this.throwIfFileSystemIsReadonly(await this.withProvider(resource), resource);
 
         // mkdir recursively
@@ -1260,7 +1264,12 @@ export class FileService {
 
         // events
         const fileStat = await this.resolve(resource, { resolveMetadata: true });
-        this.onDidRunOperationEmitter.fire(new FileOperationEvent(resource, FileOperation.CREATE, fileStat));
+
+        if (fromUserGesture) {
+            this.onDidRunUserOperationEmitter.fire({ correlationId: this.correlationIds++, operation: FileOperation.CREATE, target: resource });
+        } else {
+            this.onDidRunOperationEmitter.fire(new FileOperationEvent(resource, FileOperation.CREATE, fileStat));
+        }
 
         return fileStat;
     }
@@ -1371,7 +1380,9 @@ export class FileService {
     /**
      * An event that is emitted when files are changed on the disk.
      */
-    readonly onDidFilesChange = this.onDidFilesChangeEmitter.event;
+    get onDidFilesChange(): Event<FileChangesEvent> {
+        return this.onDidFilesChangeEmitter.event;
+    }
 
     private activeWatchers = new Map<string, { disposable: Disposable, count: number }>();
 

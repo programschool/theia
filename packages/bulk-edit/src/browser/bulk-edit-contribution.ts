@@ -14,23 +14,22 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { injectable, inject } from '@theia/core/shared/inversify';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
 import { Widget } from '@theia/core/lib/browser/widgets/widget';
 import { CommandRegistry } from '@theia/core/lib/common';
 import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { BulkEditCommands } from './bulk-edit-commands';
 import { MonacoBulkEditService } from '@theia/monaco/lib/browser/monaco-bulk-edit-service';
 import { TabBarToolbarContribution, TabBarToolbarRegistry } from '@theia/core/lib/browser/shell/tab-bar-toolbar';
-import { BulkEditTreeWidget, BULK_EDIT_TREE_WIDGET_ID } from './bulk-edit-tree';
-import { QuickViewService } from '@theia/core/lib/browser/quick-view-service';
-
-export const BULK_EDIT_WIDGET_NAME = 'Refactor Preview';
+import { BulkEditTreeWidget, BULK_EDIT_TREE_WIDGET_ID, BULK_EDIT_WIDGET_NAME } from './bulk-edit-tree';
+import { QuickViewService } from '@theia/core/lib/browser';
+import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
 export class BulkEditContribution extends AbstractViewContribution<BulkEditTreeWidget> implements TabBarToolbarContribution {
-    private workspaceEdit: monaco.languages.WorkspaceEdit;
+    private edits: monaco.editor.ResourceEdit[];
 
-    @inject(QuickViewService)
+    @inject(QuickViewService) @optional()
     protected readonly quickView: QuickViewService;
 
     constructor(private readonly bulkEditService: MonacoBulkEditService) {
@@ -41,12 +40,12 @@ export class BulkEditContribution extends AbstractViewContribution<BulkEditTreeW
                 area: 'bottom'
             }
         });
-        this.bulkEditService.setPreviewHandler((edits: monaco.languages.WorkspaceEdit) => this.previewEdit(edits));
+        this.bulkEditService.setPreviewHandler((edits: monaco.editor.ResourceEdit[]) => this.previewEdit(edits));
     }
 
     registerCommands(registry: CommandRegistry): void {
         super.registerCommands(registry);
-        this.quickView.hideItem(BULK_EDIT_WIDGET_NAME);
+        this.quickView?.hideItem(BULK_EDIT_WIDGET_NAME);
 
         registry.registerCommand(BulkEditCommands.APPLY, {
             isEnabled: widget => this.withWidget(widget, () => true),
@@ -64,13 +63,13 @@ export class BulkEditContribution extends AbstractViewContribution<BulkEditTreeW
         toolbarRegistry.registerItem({
             id: BulkEditCommands.APPLY.id,
             command: BulkEditCommands.APPLY.id,
-            tooltip: 'Apply Refactoring',
+            tooltip: nls.localizeByDefault('Apply Refactoring'),
             priority: 0,
         });
         toolbarRegistry.registerItem({
             id: BulkEditCommands.DISCARD.id,
             command: BulkEditCommands.DISCARD.id,
-            tooltip: 'Discard Refactoring',
+            tooltip: nls.localizeByDefault('Discard Refactoring'),
             priority: 1,
         });
     }
@@ -82,33 +81,31 @@ export class BulkEditContribution extends AbstractViewContribution<BulkEditTreeW
         return false;
     }
 
-    private async previewEdit(workspaceEdit: monaco.languages.WorkspaceEdit): Promise<monaco.languages.WorkspaceEdit> {
+    private async previewEdit(edits: monaco.editor.ResourceEdit[]): Promise<monaco.editor.ResourceEdit[]> {
         const widget = await this.openView({ activate: true });
 
         if (widget) {
-            this.workspaceEdit = workspaceEdit;
-            await widget.initModel(workspaceEdit);
+            this.edits = edits;
+            await widget.initModel(edits);
         }
 
-        return workspaceEdit;
+        return edits;
     }
 
     private apply(): void {
-        if (this.workspaceEdit?.edits) {
-            this.workspaceEdit.edits.forEach(edit => {
+        if (this.edits) {
+            this.edits.forEach(edit => {
                 if (edit.metadata) {
                     edit.metadata.needsConfirmation = false;
                 }
             });
-            this.bulkEditService.apply(this.workspaceEdit);
+            this.bulkEditService.apply(this.edits);
         }
         this.closeView();
     }
 
     private discard(): void {
-        if (this.workspaceEdit) {
-            this.workspaceEdit.edits = [];
-        }
+        this.edits = [];
         this.closeView();
     }
 }

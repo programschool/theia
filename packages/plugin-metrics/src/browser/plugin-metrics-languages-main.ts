@@ -14,14 +14,13 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { Range, WorkspaceSymbolParams } from '@theia/plugin-ext/lib/common/plugin-api-rpc-model';
+import { Range, SerializedDocumentFilter, WorkspaceSymbolParams } from '@theia/plugin-ext/lib/common/plugin-api-rpc-model';
 import { PluginMetricsResolver } from './plugin-metrics-resolver';
 import { LanguagesMainImpl } from '@theia/plugin-ext/lib/main/browser/languages-main';
 import { SymbolInformation } from '@theia/core/shared/vscode-languageserver-types';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import * as vst from '@theia/core/shared/vscode-languageserver-protocol';
 import { PluginInfo } from '@theia/plugin-ext/lib/common/plugin-api-rpc';
-import { SerializedDocumentFilter } from '@theia/plugin-ext/lib/common/plugin-api-rpc-model';
 import * as theia from '@theia/plugin';
 
 @injectable()
@@ -45,11 +44,11 @@ export class LanguagesMainPluginMetrics extends LanguagesMainImpl {
             super.provideCompletionItems(handle, model, position, context, token));
     }
 
-    protected resolveCompletionItem(handle: number, model: monaco.editor.ITextModel, position: monaco.Position,
+    protected resolveCompletionItem(handle: number,
         item: monaco.languages.CompletionItem, token: monaco.CancellationToken): monaco.languages.ProviderResult<monaco.languages.CompletionItem> {
         return this.pluginMetricsResolver.resolveRequest(this.handleToExtensionName(handle),
             vst.CompletionRequest.type.method,
-            super.resolveCompletionItem(handle, model, position, item, token));
+            super.resolveCompletionItem(handle, item, token));
     }
 
     protected provideReferences(handle: number, model: monaco.editor.ITextModel, position: monaco.Position,

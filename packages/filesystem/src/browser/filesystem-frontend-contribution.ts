@@ -17,13 +17,14 @@
 import { injectable, inject } from '@theia/core/shared/inversify';
 import URI from '@theia/core/lib/common/uri';
 import { environment } from '@theia/core/shared/@theia/application-package/lib/environment';
-import { MaybePromise, SelectionService, isCancelled } from '@theia/core/lib/common';
+import { MaybePromise, SelectionService, isCancelled, Emitter } from '@theia/core/lib/common';
 import { Command, CommandContribution, CommandRegistry } from '@theia/core/lib/common/command';
 import {
     FrontendApplicationContribution, ApplicationShell,
     NavigatableWidget, NavigatableWidgetOptions,
     Saveable, WidgetManager, StatefulWidget, FrontendApplication, ExpandableTreeNode, waitForClosed,
-    CorePreferences
+    CorePreferences,
+    CommonCommands
 } from '@theia/core/lib/browser';
 import { MimeService } from '@theia/core/lib/browser/mime-service';
 import { TreeWidgetSelection } from '@theia/core/lib/browser/tree/tree-widget-selection';
@@ -36,11 +37,11 @@ import { Deferred } from '@theia/core/lib/common/promise-util';
 
 export namespace FileSystemCommands {
 
-    export const UPLOAD: Command = {
+    export const UPLOAD = Command.toLocalizedCommand({
         id: 'file.upload',
-        category: 'File',
+        category: CommonCommands.FILE_CATEGORY,
         label: 'Upload Files...'
-    };
+    }, 'theia/filesystem/uploadFiles', CommonCommands.FILE_CATEGORY_KEY);
 
 }
 
@@ -75,6 +76,9 @@ export class FileSystemFrontendContribution implements FrontendApplicationContri
 
     @inject(FileService)
     protected readonly fileService: FileService;
+
+    protected onDidChangeEditorFileEmitter = new Emitter<{ editor: NavigatableWidget, type: FileChangeType }>();
+    readonly onDidChangeEditorFile = this.onDidChangeEditorFileEmitter.event;
 
     protected readonly userOperations = new Map<number, Deferred<void>>();
     protected queueUserOperation(event: UserFileOperationEvent): void {
@@ -300,6 +304,7 @@ export class FileSystemFrontendContribution implements FrontendApplicationContri
             }
             if (!deleted) {
                 widget.title.label += this.deletedSuffix;
+                this.onDidChangeEditorFileEmitter.fire({ editor: widget, type: FileChangeType.DELETED });
             }
             const widgets = toClose.get(uriString) || [];
             widgets.push(widget);
@@ -307,6 +312,7 @@ export class FileSystemFrontendContribution implements FrontendApplicationContri
         } else if (event.contains(uri, FileChangeType.ADDED)) {
             if (deleted) {
                 widget.title.label = widget.title.label.substr(0, label.length - this.deletedSuffix.length);
+                this.onDidChangeEditorFileEmitter.fire({ editor: widget, type: FileChangeType.ADDED });
             }
         }
     }

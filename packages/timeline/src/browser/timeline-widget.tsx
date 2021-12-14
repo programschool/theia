@@ -25,13 +25,12 @@ import {
     PanelLayout
 } from '@theia/core/lib/browser';
 import { TimelineTreeWidget } from './timeline-tree-widget';
-import { TimelineService } from './timeline-service';
+import { TimelineService, TimelineAggregate } from './timeline-service';
 import { CommandRegistry, SelectionService } from '@theia/core/lib/common';
 import { TimelineEmptyWidget } from './timeline-empty-widget';
 import { toArray } from '@theia/core/shared/@phosphor/algorithm';
 import URI from '@theia/core/lib/common/uri';
 import { URI as CodeURI } from '@theia/core/shared/vscode-uri';
-import { TimelineAggregate } from './timeline-service';
 
 @injectable()
 export class TimelineWidget extends BaseWidget {
@@ -68,14 +67,14 @@ export class TimelineWidget extends BaseWidget {
 
         this.refresh();
         this.toDispose.push(this.timelineService.onDidChangeTimeline(event => {
-                const currentWidgetUri = this.getCurrentWidgetUri();
-                if (currentWidgetUri ) {
-                    this.loadTimeline(currentWidgetUri, event.reset);
-                }
-            })
+            const currentWidgetUri = this.getCurrentWidgetUri();
+            if (currentWidgetUri) {
+                this.loadTimeline(currentWidgetUri, event.reset);
+            }
+        })
         );
         this.toDispose.push(this.selectionService.onSelectionChanged(selection => {
-            if (Array.isArray(selection) && 'uri' in selection[0]) {
+            if (Array.isArray(selection) && !!selection[0] && 'uri' in selection[0]) {
                 this.refresh(selection[0].uri);
             }
         }));
@@ -155,7 +154,7 @@ export class TimelineWidget extends BaseWidget {
                 }
             });
         }
-        return  NavigatableWidget.is(current) ? current.getResourceUri() : undefined;
+        return NavigatableWidget.is(current) ? current.getResourceUri() : undefined;
     }
 
     protected get containerLayout(): PanelLayout | undefined {

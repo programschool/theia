@@ -19,16 +19,39 @@ import {
     MAIN_RPC_CONTEXT,
     TaskExecutionDto,
     TasksExt,
-    TaskDto
+    TaskDto,
+    TaskPresentationOptionsDTO
 } from '../../common/plugin-api-rpc';
 import { RPCProtocol } from '../../common/rpc-protocol';
 import { Disposable, DisposableCollection } from '@theia/core/lib/common';
 import { TaskProviderRegistry, TaskResolverRegistry, TaskProvider, TaskResolver } from '@theia/task/lib/browser/task-contribution';
 import { interfaces } from '@theia/core/shared/inversify';
-import { TaskInfo, TaskExitedEvent, TaskConfiguration, TaskCustomization } from '@theia/task/lib/common/task-protocol';
+import { TaskInfo, TaskExitedEvent, TaskConfiguration, TaskCustomization, TaskOutputPresentation, RevealKind, PanelKind } from '@theia/task/lib/common/task-protocol';
 import { TaskWatcher } from '@theia/task/lib/common/task-watcher';
 import { TaskService } from '@theia/task/lib/browser/task-service';
 import { TaskDefinitionRegistry } from '@theia/task/lib/browser';
+
+const revealKindMap = new Map<number | RevealKind, RevealKind | number>(
+    [
+        [1, RevealKind.Always],
+        [2, RevealKind.Silent],
+        [3, RevealKind.Never],
+        [RevealKind.Always, 1],
+        [RevealKind.Silent, 2],
+        [RevealKind.Never, 3]
+    ]
+);
+
+const panelKindMap = new Map<number | PanelKind, PanelKind | number>(
+    [
+        [1, PanelKind.Shared],
+        [2, PanelKind.Dedicated],
+        [3, PanelKind.New],
+        [PanelKind.Shared, 1],
+        [PanelKind.Dedicated, 2],
+        [PanelKind.New, 3]
+    ]
+);
 
 export class TasksMainImpl implements TasksMain, Disposable {
     private readonly proxy: TasksExt;
@@ -53,7 +76,7 @@ export class TasksMainImpl implements TasksMain, Disposable {
             this.proxy.$onDidStartTask({
                 id: event.taskId,
                 task: this.fromTaskConfiguration(event.config)
-            });
+            }, event.terminalId!);
         }));
 
         this.toDispose.push(this.taskWatcher.onTaskExit((event: TaskExitedEvent) => {
@@ -74,6 +97,13 @@ export class TasksMainImpl implements TasksMain, Disposable {
                 this.proxy.$onDidEndTaskProcess(event.code, event.taskId);
             }
         }));
+
+        // Inform proxy about running tasks form previous session
+        this.$taskExecutions().then(executions => {
+            if (executions.length > 0) {
+                this.proxy.$initLoadedTasks(executions);
+            }
+        });
     }
 
     dispose(): void {
@@ -86,7 +116,7 @@ export class TasksMainImpl implements TasksMain, Disposable {
 
         const toDispose = new DisposableCollection(
             this.taskProviderRegistry.register(type, taskProvider, handle),
-            this.taskResolverRegistry.register(type, taskResolver),
+            this.taskResolverRegistry.registerTaskResolver(type, taskResolver),
             Disposable.create(() => this.taskProviders.delete(handle))
         );
         this.taskProviders.set(handle, toDispose);
@@ -114,14 +144,7 @@ export class TasksMainImpl implements TasksMain, Disposable {
         for (const tasks of [configured, provided]) {
             for (const task of tasks) {
                 if (!taskType || (!!this.taskDefinitionRegistry.getDefinition(task) ? task._source === taskType : task.type === taskType)) {
-                    const { type, label, _scope, _source, ...properties } = task;
-                    const dto: TaskDto = { type, label, scope: _scope, source: _source };
-                    for (const key in properties) {
-                        if (properties.hasOwnProperty(key)) {
-                            dto[key] = properties[key];
-                        }
-                    }
-                    result.push(dto);
+                    result.push(this.fromTaskConfiguration(task));
                 }
             }
         }
@@ -154,6 +177,10 @@ export class TasksMainImpl implements TasksMain, Disposable {
         this.taskService.kill(id);
     }
 
+    async $customExecutionComplete(id: number, exitCode: number | undefined): Promise<void> {
+        this.taskService.customExecutionComplete(id, exitCode);
+    }
+
     protected createTaskProvider(handle: number): TaskProvider {
         return {
             provideTasks: () =>
@@ -175,31 +202,62 @@ export class TasksMainImpl implements TasksMain, Disposable {
     }
 
     protected toTaskConfiguration(taskDto: TaskDto): TaskConfiguration {
-        const { group, ...taskConfiguration } = taskDto;
-        if (group === 'build' || group === 'test') {
-            taskConfiguration.group = group;
+        const { group, presentation, scope, source, ...common } = taskDto ?? {};
+        const partialConfig: Partial<TaskConfiguration> = {};
+        if (presentation) {
+            partialConfig.presentation = this.convertTaskPresentation(presentation);
         }
-
-        return Object.assign(taskConfiguration, {
-            _source: taskConfiguration.source,
-            _scope: taskConfiguration.scope
-        });
+        if (group === 'build' || group === 'test') {
+            partialConfig.group = group;
+        }
+        return {
+            ...common,
+            ...partialConfig,
+            _scope: scope,
+            _source: source,
+        };
     }
 
     protected fromTaskConfiguration(task: TaskConfiguration): TaskDto {
-        const { group, ...taskDto } = task;
+        const { group, presentation, _scope, _source, ...common } = task;
+        const partialDto: Partial<TaskDto> = {};
+        if (presentation) {
+            partialDto.presentation = this.convertTaskPresentation(presentation);
+        }
         if (group) {
             if (TaskCustomization.isBuildTask(task)) {
-                taskDto.group = 'build';
+                partialDto.group = 'build';
             } else if (TaskCustomization.isTestTask(task)) {
-                taskDto.group = 'test';
+                partialDto.group = 'test';
             }
         }
-
-        return Object.assign(taskDto, {
-            source: taskDto._source,
-            scope: taskDto._scope
-        });
+        return {
+            ...common,
+            ...partialDto,
+            scope: _scope,
+            source: _source,
+        };
     }
 
+    private convertTaskPresentation(presentationFrom: undefined): undefined;
+    private convertTaskPresentation(presentationFrom: TaskOutputPresentation): TaskPresentationOptionsDTO;
+    private convertTaskPresentation(presentationFrom: TaskPresentationOptionsDTO): TaskOutputPresentation;
+    private convertTaskPresentation(
+        presentationFrom: TaskOutputPresentation | TaskPresentationOptionsDTO | undefined
+    ): TaskOutputPresentation | TaskPresentationOptionsDTO | undefined {
+        if (presentationFrom) {
+            const { reveal, panel, ...common } = presentationFrom;
+            const presentationTo: Partial<TaskOutputPresentation | TaskPresentationOptionsDTO> = {};
+            if (reveal) {
+                presentationTo.reveal = revealKindMap.get(reveal);
+            }
+            if (panel) {
+                presentationTo.panel = panelKindMap.get(panel)!;
+            }
+            return {
+                ...common,
+                ...presentationTo,
+            };
+        }
+    }
 }

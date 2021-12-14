@@ -18,16 +18,17 @@ import { injectable, inject, postConstruct } from '@theia/core/shared/inversify'
 import URI from '@theia/core/lib/common/uri';
 import { Widget } from '@theia/core/lib/browser/widgets/widget';
 import { MaybePromise } from '@theia/core/lib/common/types';
-import { CommonCommands, quickCommand, OpenHandler, open, OpenerOptions, OpenerService } from '@theia/core/lib/browser';
+import { CommonCommands, quickCommand, OpenHandler, open, OpenerOptions, OpenerService, QuickPickItem, QuickPickValue } from '@theia/core/lib/browser';
 import { CommandRegistry, MenuModelRegistry, CommandService } from '@theia/core/lib/common';
 import { AbstractViewContribution } from '@theia/core/lib/browser/shell/view-contribution';
 import { OutputWidget } from './output-widget';
 import { OutputContextMenu } from './output-context-menu';
 import { OutputUri } from '../common/output-uri';
 import { ClipboardService } from '@theia/core/lib/browser/clipboard-service';
-import { OutputChannelManager, OutputChannel } from '../common/output-channel';
+import { OutputChannelManager, OutputChannel } from './output-channel';
 import { OutputCommands } from './output-commands';
-import { QuickPickService, QuickPickItem } from '@theia/core/lib/common/quick-pick-service';
+import { QuickPickService } from '@theia/core/lib/common/quick-pick-service';
+import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
 export class OutputContribution extends AbstractViewContribution<OutputWidget> implements OpenHandler {
@@ -52,7 +53,7 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
     constructor() {
         super({
             widgetId: OutputWidget.ID,
-            widgetName: 'Output',
+            widgetName: OutputWidget.LABEL,
             defaultWidgetOptions: {
                 area: 'bottom'
             },
@@ -162,7 +163,7 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
         registry.registerCommand(OutputCommands.CLEAR__QUICK_PICK, {
             execute: async () => {
                 const channel = await this.pick({
-                    placeholder: 'Clear output channel.',
+                    placeholder: OutputCommands.CLEAR__QUICK_PICK.label!,
                     channels: this.outputChannelManager.getChannels().slice()
                 });
                 if (channel) {
@@ -175,7 +176,7 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
         registry.registerCommand(OutputCommands.SHOW__QUICK_PICK, {
             execute: async () => {
                 const channel = await this.pick({
-                    placeholder: 'Show output channel.',
+                    placeholder: OutputCommands.SHOW__QUICK_PICK.label!,
                     channels: this.outputChannelManager.getChannels().slice()
                 });
                 if (channel) {
@@ -189,7 +190,7 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
         registry.registerCommand(OutputCommands.HIDE__QUICK_PICK, {
             execute: async () => {
                 const channel = await this.pick({
-                    placeholder: 'Hide output channel.',
+                    placeholder: OutputCommands.HIDE__QUICK_PICK.label!,
                     channels: this.outputChannelManager.getVisibleChannels().slice()
                 });
                 if (channel) {
@@ -203,7 +204,7 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
         registry.registerCommand(OutputCommands.DISPOSE__QUICK_PICK, {
             execute: async () => {
                 const channel = await this.pick({
-                    placeholder: 'Close output channel.',
+                    placeholder: OutputCommands.DISPOSE__QUICK_PICK.label!,
                     channels: this.outputChannelManager.getChannels().slice()
                 });
                 if (channel) {
@@ -223,15 +224,15 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
         });
         registry.registerMenuAction(OutputContextMenu.TEXT_EDIT_GROUP, {
             commandId: OutputCommands.COPY_ALL.id,
-            label: 'Copy All'
+            label: nls.localizeByDefault('Copy All')
         });
         registry.registerMenuAction(OutputContextMenu.COMMAND_GROUP, {
             commandId: quickCommand.id,
-            label: 'Find Command...'
+            label: nls.localizeByDefault('Command Palette...')
         });
         registry.registerMenuAction(OutputContextMenu.WIDGET_GROUP, {
             commandId: OutputCommands.CLEAR__WIDGET.id,
-            label: 'Clear Output'
+            label: nls.localizeByDefault('Clear Output')
         });
     }
 
@@ -255,17 +256,19 @@ export class OutputContribution extends AbstractViewContribution<OutputWidget> i
     }
 
     protected async pick({ channels, placeholder }: { channels: OutputChannel[], placeholder: string }): Promise<OutputChannel | undefined> {
-        const items: QuickPickItem<OutputChannel>[] = [];
+        const items: Array<QuickPickValue<OutputChannel> | QuickPickItem> = [];
+        const outputChannels = nls.localize('theia/output/outputChannels', 'Output Channels');
+        const hiddenChannels = nls.localize('theia/output/hiddenChannels', 'Hidden Channels');
         for (let i = 0; i < channels.length; i++) {
             const channel = channels[i];
             if (i === 0) {
-                items.push({ label: channel.isVisible ? 'Output Channels' : 'Hidden Channels', type: 'separator' });
+                items.push({ label: channel.isVisible ? outputChannels : hiddenChannels, type: 'separator' });
             } else if (!channel.isVisible && channels[i - 1].isVisible) {
-                items.push({ label: 'Hidden Channels', type: 'separator' });
+                items.push({ label: hiddenChannels, type: 'separator' });
             }
             items.push({ label: channel.name, value: channel });
         }
-        return this.quickPickService.show(items, { placeholder });
+        const selectedItem = await this.quickPickService.show(items, { placeholder });
+        return selectedItem && ('value' in selectedItem) ? selectedItem.value : undefined;
     }
-
 }

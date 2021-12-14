@@ -22,17 +22,18 @@ import {
     PreferenceSchema,
     PreferenceContribution
 } from '@theia/core/lib/browser/preferences';
+import { nls } from '@theia/core/lib/common/nls';
 
 export const workspacePreferenceSchema: PreferenceSchema = {
     type: 'object',
     properties: {
         'workspace.preserveWindow': {
-            description: 'Enable opening workspaces in current window.',
+            description: nls.localize('theia/workspace/preserveWindow', 'Enable opening workspaces in current window.'),
             type: 'boolean',
             default: false
         },
         'workspace.supportMultiRootWorkspace': {
-            description: 'Controls whether multi-root workspace support is enabled.',
+            description: nls.localize('theia/workspace/supportMultiRootWorkspace', 'Controls whether multi-root workspace support is enabled.'),
             type: 'boolean',
             default: true
         }
@@ -44,18 +45,20 @@ export interface WorkspaceConfiguration {
     'workspace.supportMultiRootWorkspace': boolean
 }
 
+export const WorkspacePreferenceContribution = Symbol('WorkspacePreferenceContribution');
 export const WorkspacePreferences = Symbol('WorkspacePreferences');
 export type WorkspacePreferences = PreferenceProxy<WorkspaceConfiguration>;
 
-export function createWorkspacePreferences(preferences: PreferenceService): WorkspacePreferences {
-    return createPreferenceProxy(preferences, workspacePreferenceSchema);
+export function createWorkspacePreferences(preferences: PreferenceService, schema: PreferenceSchema = workspacePreferenceSchema): WorkspacePreferences {
+    return createPreferenceProxy(preferences, schema);
 }
 
 export function bindWorkspacePreferences(bind: interfaces.Bind): void {
     bind(WorkspacePreferences).toDynamicValue(ctx => {
         const preferences = ctx.container.get<PreferenceService>(PreferenceService);
-        return createWorkspacePreferences(preferences);
+        const contribution = ctx.container.get<PreferenceContribution>(WorkspacePreferenceContribution);
+        return createWorkspacePreferences(preferences, contribution.schema);
     }).inSingletonScope();
-
-    bind(PreferenceContribution).toConstantValue({ schema: workspacePreferenceSchema });
+    bind(WorkspacePreferenceContribution).toConstantValue({ schema: workspacePreferenceSchema });
+    bind(PreferenceContribution).toService(WorkspacePreferenceContribution);
 }

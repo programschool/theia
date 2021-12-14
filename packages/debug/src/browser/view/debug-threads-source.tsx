@@ -24,12 +24,6 @@ export class DebugThreadsSource extends TreeSource {
     @inject(DebugViewModel)
     protected readonly model: DebugViewModel;
 
-    constructor() {
-        super({
-            placeholder: 'Not running'
-        });
-    }
-
     @postConstruct()
     protected init(): void {
         this.fireDidChange();
@@ -40,11 +34,15 @@ export class DebugThreadsSource extends TreeSource {
         return this.model.sessionCount > 1;
     }
 
-    getElements(): IterableIterator<TreeElement> {
+    *getElements(): IterableIterator<TreeElement> {
         if (this.model.sessionCount === 1 && this.model.session && this.model.session.threadCount) {
-            return this.model.session.threads;
+            return yield* this.model.session.threads;
         }
-        return this.model.sessions;
+        for (const session of this.model.sessions) {
+            if (!session.parentSession) {
+                yield session;
+            }
+        }
     }
 
 }

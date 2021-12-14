@@ -15,7 +15,7 @@
  ********************************************************************************/
 
 import { inject, injectable, named } from 'inversify';
-import { screen, globalShortcut, app, BrowserWindow, BrowserWindowConstructorOptions, Event as ElectronEvent } from '../../shared/electron';
+import { screen, globalShortcut, ipcMain, app, BrowserWindow, BrowserWindowConstructorOptions, Event as ElectronEvent } from '../../shared/electron';
 import * as path from 'path';
 import { Argv } from 'yargs';
 import { AddressInfo } from 'net';
@@ -30,6 +30,17 @@ import { ContributionProvider } from '../common/contribution-provider';
 import { ElectronSecurityTokenService } from './electron-security-token-service';
 import { ElectronSecurityToken } from '../electron-common/electron-token';
 import Storage = require('electron-store');
+import { isOSX, isWindows } from '../common';
+import {
+    CLOSE_REQUESTED_SIGNAL,
+    RELOAD_REQUESTED_SIGNAL,
+    RequestTitleBarStyle,
+    Restart, StopReason,
+    TitleBarStyleAtStartup,
+    TitleBarStyleChanged
+} from '../electron-common/messaging/electron-messages';
+import { DEFAULT_WINDOW_HASH } from '../common/window';
+
 const createYargs: (argv?: string[], cwd?: string) => Argv = require('yargs/yargs');
 
 /**
@@ -37,6 +48,13 @@ const createYargs: (argv?: string[], cwd?: string) => Argv = require('yargs/yarg
  */
 export interface TheiaBrowserWindowOptions extends BrowserWindowConstructorOptions {
     isMaximized?: boolean;
+    isFullScreen?: boolean;
+    /**
+     * Represents the complete screen layout for all available displays.
+     * This field is used to determine if the layout was updated since the electron window was last opened,
+     * in which case we want to invalidate the stored options and use the default options instead.
+     */
+    screenLayout?: string;
 }
 
 /**
@@ -178,6 +196,12 @@ export class ElectronMainApplication {
     readonly backendPort = this._backendPort.promise;
 
     protected _config: FrontendApplicationConfig | undefined;
+    protected useNativeWindowFrame: boolean = true;
+    protected didUseNativeWindowFrameOnStart = new Map<number, boolean>();
+    protected restarting = false;
+    protected closeIsConfirmed = new Set<number>();
+    protected closeRequested = 0;
+
     get config(): FrontendApplicationConfig {
         if (!this._config) {
             throw new Error('You have to start the application first.');
@@ -186,6 +210,7 @@ export class ElectronMainApplication {
     }
 
     async start(config: FrontendApplicationConfig): Promise<void> {
+        this.useNativeWindowFrame = this.getTitleBarStyle(config) === 'native';
         this._config = config;
         this.hookApplicationEvents();
         const port = await this.startBackend();
@@ -198,6 +223,23 @@ export class ElectronMainApplication {
             argv: this.processArgv.getProcessArgvWithoutBin(process.argv),
             cwd: process.cwd()
         });
+    }
+
+    protected getTitleBarStyle(config: FrontendApplicationConfig): 'native' | 'custom' {
+        if (isOSX) {
+            return 'native';
+        }
+        const storedFrame = this.electronStore.get('windowstate')?.frame;
+        if (storedFrame !== undefined) {
+            return !!storedFrame ? 'native' : 'custom';
+        }
+        if (config.preferences && config.preferences['window.titleBarStyle']) {
+            const titleBarStyle = config.preferences['window.titleBarStyle'];
+            if (titleBarStyle === 'native' || titleBarStyle === 'custom') {
+                return titleBarStyle;
+            }
+        }
+        return isWindows ? 'custom' : 'native';
     }
 
     protected async launch(params: ElectronMainExecutionParams): Promise<void> {
@@ -214,24 +256,49 @@ export class ElectronMainApplication {
      *
      * @param options
      */
-    async createWindow(asyncOptions: MaybePromise<TheiaBrowserWindowOptions> = this.getDefaultBrowserWindowOptions()): Promise<BrowserWindow> {
-        const options = await asyncOptions;
+    async createWindow(asyncOptions: MaybePromise<TheiaBrowserWindowOptions> = this.getDefaultTheiaWindowOptions()): Promise<BrowserWindow> {
+        let options = await asyncOptions;
+        options = this.avoidOverlap(options);
         const electronWindow = new BrowserWindow(options);
+        electronWindow.setMenuBarVisibility(false);
         this.attachReadyToShow(electronWindow);
         this.attachSaveWindowState(electronWindow);
         this.attachGlobalShortcuts(electronWindow);
         this.restoreMaximizedState(electronWindow, options);
+        this.attachCloseListeners(electronWindow, options);
         return electronWindow;
     }
 
-    protected async getDefaultBrowserWindowOptions(): Promise<TheiaBrowserWindowOptions> {
-        const windowOptionsFromConfig = this.config.electron?.windowOptions || {};
-        let windowState: TheiaBrowserWindowOptions | undefined = this.electronStore.get('windowstate', undefined);
-        if (!windowState) {
-            windowState = this.getDefaultWindowState();
-        }
+    async getLastWindowOptions(): Promise<TheiaBrowserWindowOptions> {
+        const previousWindowState: TheiaBrowserWindowOptions | undefined = this.electronStore.get('windowstate');
+        const windowState = previousWindowState?.screenLayout === this.getCurrentScreenLayout()
+            ? previousWindowState
+            : this.getDefaultTheiaWindowOptions();
         return {
-            ...windowState,
+            frame: this.useNativeWindowFrame,
+            ...this.getDefaultOptions(),
+            ...windowState
+        };
+    }
+
+    protected avoidOverlap(options: TheiaBrowserWindowOptions): TheiaBrowserWindowOptions {
+        const existingWindowsBounds = BrowserWindow.getAllWindows().map(window => window.getBounds());
+        if (existingWindowsBounds.length > 0) {
+            while (existingWindowsBounds.some(window => window.x === options.x || window.y === options.y)) {
+                // if the window is maximized or in fullscreen, use the default window options.
+                if (options.isMaximized || options.isFullScreen) {
+                    options = this.getDefaultTheiaWindowOptions();
+                }
+                options.x = options.x! + 30;
+                options.y = options.y! + 30;
+
+            }
+        }
+        return options;
+    }
+
+    protected getDefaultOptions(): TheiaBrowserWindowOptions {
+        return {
             show: false,
             title: this.config.applicationName,
             minWidth: 200,
@@ -243,19 +310,20 @@ export class ElectronMainApplication {
                 // Issue: https://github.com/eclipse-theia/theia/issues/8577
                 nodeIntegrationInWorker: false,
             },
-            ...windowOptionsFromConfig,
+            ...this.config.electron?.windowOptions || {},
         };
     }
 
-    protected async openDefaultWindow(): Promise<BrowserWindow> {
+    async openDefaultWindow(): Promise<BrowserWindow> {
         const [uri, electronWindow] = await Promise.all([this.createWindowUri(), this.createWindow()]);
-        electronWindow.loadURL(uri.toString(true));
+        electronWindow.loadURL(uri.withFragment(DEFAULT_WINDOW_HASH).toString(true));
         return electronWindow;
     }
 
     protected async openWindowWithWorkspace(workspacePath: string): Promise<BrowserWindow> {
-        const [uri, electronWindow] = await Promise.all([this.createWindowUri(), this.createWindow()]);
-        electronWindow.loadURL(uri.withFragment(workspacePath).toString(true));
+        const options = await this.getLastWindowOptions();
+        const [uri, electronWindow] = await Promise.all([this.createWindowUri(), this.createWindow(options)]);
+        electronWindow.loadURL(uri.withFragment(encodeURI(workspacePath)).toString(true));
         return electronWindow;
     }
 
@@ -267,7 +335,9 @@ export class ElectronMainApplication {
     }
 
     protected async handleMainCommand(params: ElectronMainExecutionParams, options: ElectronMainCommandOptions): Promise<void> {
-        if (options.file === undefined) {
+        if (params.secondInstance === false) {
+            await this.openWindowWithWorkspace(''); // restore previous workspace.
+        } else if (options.file === undefined) {
             await this.openDefaultWindow();
         } else {
             let workspacePath: string | undefined;
@@ -289,17 +359,26 @@ export class ElectronMainApplication {
             .withQuery(`port=${await this.backendPort}`);
     }
 
-    protected getDefaultWindowState(): BrowserWindowConstructorOptions {
+    protected getDefaultTheiaWindowOptions(): TheiaBrowserWindowOptions {
         // The `screen` API must be required when the application is ready.
         // See: https://electronjs.org/docs/api/screen#screen
         // We must center by hand because `browserWindow.center()` fails on multi-screen setups
         // See: https://github.com/electron/electron/issues/3490
         const { bounds } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
-        const height = Math.floor(bounds.height * (2 / 3));
-        const width = Math.floor(bounds.width * (2 / 3));
-        const y = Math.floor(bounds.y + (bounds.height - height) / 2);
-        const x = Math.floor(bounds.x + (bounds.width - width) / 2);
-        return { width, height, x, y };
+        const height = Math.round(bounds.height * (2 / 3));
+        const width = Math.round(bounds.width * (2 / 3));
+        const y = Math.round(bounds.y + (bounds.height - height) / 2);
+        const x = Math.round(bounds.x + (bounds.width - width) / 2);
+        return {
+            frame: this.useNativeWindowFrame,
+            isFullScreen: false,
+            isMaximized: false,
+            width,
+            height,
+            x,
+            y,
+            ...this.getDefaultOptions()
+        };
     }
 
     /**
@@ -313,54 +392,71 @@ export class ElectronMainApplication {
      * Save the window geometry state on every change.
      */
     protected attachSaveWindowState(electronWindow: BrowserWindow): void {
-        const saveWindowState = () => {
-            try {
-                let bounds;
-                if (electronWindow.isMaximized()) {
-                    bounds = this.electronStore.get('windowstate', {});
-                } else {
-                    bounds = electronWindow.getBounds();
-                }
-                this.electronStore.set('windowstate', {
-                    isMaximized: electronWindow.isMaximized(),
-                    width: bounds.width,
-                    height: bounds.height,
-                    x: bounds.x,
-                    y: bounds.y
-                });
-            } catch (e) {
-                console.error('Error while saving window state:', e);
-            }
-        };
         let delayedSaveTimeout: NodeJS.Timer | undefined;
         const saveWindowStateDelayed = () => {
             if (delayedSaveTimeout) {
                 clearTimeout(delayedSaveTimeout);
             }
-            delayedSaveTimeout = setTimeout(saveWindowState, 1000);
+            delayedSaveTimeout = setTimeout(() => this.saveWindowState(electronWindow), 1000);
         };
-        electronWindow.on('close', saveWindowState);
+        electronWindow.on('close', () => {
+            this.saveWindowState(electronWindow);
+            this.didUseNativeWindowFrameOnStart.delete(electronWindow.id);
+        });
         electronWindow.on('resize', saveWindowStateDelayed);
         electronWindow.on('move', saveWindowStateDelayed);
+        this.didUseNativeWindowFrameOnStart.set(electronWindow.id, this.useNativeWindowFrame);
+    }
+
+    protected saveWindowState(electronWindow: BrowserWindow): void {
+        // In some circumstances the `electronWindow` can be `null`
+        if (!electronWindow) {
+            return;
+        }
+        try {
+            const bounds = electronWindow.getBounds();
+            this.electronStore.set('windowstate', {
+                isFullScreen: electronWindow.isFullScreen(),
+                isMaximized: electronWindow.isMaximized(),
+                width: bounds.width,
+                height: bounds.height,
+                x: bounds.x,
+                y: bounds.y,
+                frame: this.useNativeWindowFrame,
+                screenLayout: this.getCurrentScreenLayout(),
+            } as TheiaBrowserWindowOptions);
+        } catch (e) {
+            console.error('Error while saving window state:', e);
+        }
+    }
+
+    /**
+     * Return a string unique to the current display layout.
+     */
+    protected getCurrentScreenLayout(): string {
+        return screen.getAllDisplays().map(
+            display => `${display.bounds.x}:${display.bounds.y}:${display.bounds.width}:${display.bounds.height}`
+        ).sort().join('-');
     }
 
     /**
      * Catch certain keybindings to prevent reloading the window using keyboard shortcuts.
      */
     protected attachGlobalShortcuts(electronWindow: BrowserWindow): void {
-        if (this.config.electron?.disallowReloadKeybinding) {
-            const accelerators = ['CmdOrCtrl+R', 'F5'];
-            electronWindow.on('focus', () => {
-                for (const accelerator of accelerators) {
-                    globalShortcut.register(accelerator, () => { });
-                }
-            });
-            electronWindow.on('blur', () => {
-                for (const accelerator of accelerators) {
-                    globalShortcut.unregister(accelerator);
-                }
-            });
-        }
+        const handler = this.config.electron?.disallowReloadKeybinding
+            ? () => { }
+            : () => this.reload(electronWindow);
+        const accelerators = ['CmdOrCtrl+R', 'F5'];
+        electronWindow.on('focus', () => {
+            for (const accelerator of accelerators) {
+                globalShortcut.register(accelerator, handler);
+            }
+        });
+        electronWindow.on('blur', () => {
+            for (const accelerator of accelerators) {
+                globalShortcut.unregister(accelerator);
+            }
+        });
     }
 
     protected restoreMaximizedState(electronWindow: BrowserWindow, options: TheiaBrowserWindowOptions): void {
@@ -369,6 +465,43 @@ export class ElectronMainApplication {
         } else {
             electronWindow.unmaximize();
         }
+    }
+
+    protected attachCloseListeners(electronWindow: BrowserWindow, options: TheiaBrowserWindowOptions): void {
+        electronWindow.on('close', async event => {
+            // User has already indicated that it is OK to close this window.
+            if (this.closeIsConfirmed.has(electronWindow.id)) {
+                this.closeIsConfirmed.delete(electronWindow.id);
+                return;
+            }
+
+            event.preventDefault();
+            this.handleStopRequest(electronWindow, () => this.doCloseWindow(electronWindow), StopReason.Close);
+        });
+    }
+
+    protected doCloseWindow(electronWindow: BrowserWindow): void {
+        this.closeIsConfirmed.add(electronWindow.id);
+        electronWindow.close();
+    }
+
+    protected async handleStopRequest(electronWindow: BrowserWindow, onSafeCallback: () => unknown, reason: StopReason): Promise<void> {
+        // Only confirm close to windows that have loaded our front end.
+        const safeToClose = !electronWindow.webContents.getURL().includes(this.globals.THEIA_FRONTEND_HTML_PATH) || await this.checkSafeToStop(electronWindow, reason);
+        if (safeToClose) {
+            onSafeCallback();
+        }
+    }
+
+    protected checkSafeToStop(electronWindow: BrowserWindow, reason: StopReason): Promise<boolean> {
+        const closeRequest = this.closeRequested++;
+        const confirmChannel = `safeToClose-${electronWindow.id}-${closeRequest}`;
+        const cancelChannel = `notSafeToClose-${electronWindow.id}-${closeRequest}`;
+        return new Promise<boolean>(resolve => {
+            electronWindow.webContents.send(CLOSE_REQUESTED_SIGNAL, { confirmChannel, cancelChannel, reason });
+            ipcMain.once(confirmChannel, () => resolve(true));
+            ipcMain.once(cancelChannel, () => resolve(false));
+        });
     }
 
     /**
@@ -428,6 +561,9 @@ export class ElectronMainApplication {
 
     protected async getForkOptions(): Promise<ForkOptions> {
         return {
+            // The backend must be a process group leader on UNIX in order to kill the tree later.
+            // See https://nodejs.org/api/child_process.html#child_process_options_detached
+            detached: process.platform !== 'win32',
             env: {
                 ...process.env,
                 [ElectronSecurityToken]: JSON.stringify(this.electronSecurityToken),
@@ -443,6 +579,21 @@ export class ElectronMainApplication {
         app.on('will-quit', this.onWillQuit.bind(this));
         app.on('second-instance', this.onSecondInstance.bind(this));
         app.on('window-all-closed', this.onWindowAllClosed.bind(this));
+
+        ipcMain.on(TitleBarStyleChanged, ({ sender }, titleBarStyle: string) => {
+            this.useNativeWindowFrame = titleBarStyle === 'native';
+            this.saveWindowState(BrowserWindow.fromId(sender.id));
+        });
+
+        ipcMain.on(Restart, ({ sender }) => {
+            this.restart(sender.id);
+        });
+
+        ipcMain.on(RELOAD_REQUESTED_SIGNAL, event => this.handleReload(event));
+
+        ipcMain.on(RequestTitleBarStyle, ({ sender }) => {
+            sender.send(TitleBarStyleAtStartup, this.didUseNativeWindowFrameOnStart.get(sender.id) ? 'native' : 'custom');
+        });
     }
 
     protected onWillQuit(event: ElectronEvent): void {
@@ -461,7 +612,32 @@ export class ElectronMainApplication {
     }
 
     protected onWindowAllClosed(event: ElectronEvent): void {
-        this.requestStop();
+        if (!this.restarting) {
+            this.requestStop();
+        }
+    }
+
+    protected restart(id: number): void {
+        this.restarting = true;
+        const window = BrowserWindow.fromId(id);
+        window.on('closed', async () => {
+            await this.launch({
+                secondInstance: false,
+                argv: this.processArgv.getProcessArgvWithoutBin(process.argv),
+                cwd: process.cwd()
+            });
+            this.restarting = false;
+        });
+        this.handleStopRequest(window, () => this.doCloseWindow(window), StopReason.Restart);
+    }
+
+    protected async handleReload(event: Electron.IpcMainEvent): Promise<void> {
+        const window = BrowserWindow.fromId(event.sender.id);
+        this.reload(window);
+    }
+
+    protected reload(electronWindow: BrowserWindow): void {
+        this.handleStopRequest(electronWindow, () => electronWindow.reload(), StopReason.Reload);
     }
 
     protected async startContributions(): Promise<void> {

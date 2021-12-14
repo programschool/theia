@@ -15,14 +15,17 @@
  ********************************************************************************/
 
 import * as net from 'net';
-import * as theia from '@theia/plugin';
-import { CommunicationProvider } from '@theia/debug/lib/common/debug-model';
 import { ChildProcess, spawn, fork, ForkOptions } from 'child_process';
+import { DebugAdapter } from '@theia/debug/lib/node/debug-model';
+import { DebugAdapterExecutable, DebugAdapterInlineImplementation, DebugAdapterNamedPipeServer, DebugAdapterServer } from '../../types-impl';
+import { InlineDebugAdapter } from '@theia/debug/lib/node/inline-debug-adapter';
+import { ProcessDebugAdapter, SocketDebugAdapter } from '@theia/debug/lib/node/stream-debug-adapter';
+const isElectron = require('is-electron');
 
 /**
  * Starts debug adapter process.
  */
-export function startDebugAdapter(executable: theia.DebugAdapterExecutable): CommunicationProvider {
+export function startDebugAdapter(executable: DebugAdapterExecutable): DebugAdapter {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const options: any = { stdio: ['pipe', 'pipe', 2] };
 
@@ -40,10 +43,13 @@ export function startDebugAdapter(executable: theia.DebugAdapterExecutable): Com
     const { command, args } = executable;
     if (command === 'node') {
         if (Array.isArray(args) && args.length > 0) {
-            const isElectron = !!process.env['ELECTRON_RUN_AS_NODE'];
             const forkOptions: ForkOptions = {
                 env: options.env,
-                execArgv: isElectron ? ['-e', 'delete process.env.ELECTRON_RUN_AS_NODE;require(process.argv[1])'] : [],
+                // When running in Electron, fork will automatically add ELECTRON_RUN_AS_NODE=1 to the env,
+                // but this will cause issues when debugging Electron apps, so we'll remove it.
+                execArgv: isElectron()
+                    ? ['-e', 'delete process.env.ELECTRON_RUN_AS_NODE;require(process.argv[1])']
+                    : [],
                 silent: true
             };
             if (options.cwd) {
@@ -59,21 +65,22 @@ export function startDebugAdapter(executable: theia.DebugAdapterExecutable): Com
         childProcess = spawn(command, args, options);
     }
 
-    return {
-        input: childProcess.stdin!,
-        output: childProcess.stdout!,
-        dispose: () => childProcess.kill()
-    };
+    return new ProcessDebugAdapter(childProcess);
 }
 
 /**
  * Connects to a remote debug server.
  */
-export function connectDebugAdapter(server: theia.DebugAdapterServer): CommunicationProvider {
+export function connectSocketDebugAdapter(server: DebugAdapterServer): SocketDebugAdapter {
     const socket = net.createConnection(server.port, server.host);
-    return {
-        input: socket,
-        output: socket,
-        dispose: () => socket.end()
-    };
+    return new SocketDebugAdapter(socket);
+}
+
+export function connectPipeDebugAdapter(adapter: DebugAdapterNamedPipeServer): SocketDebugAdapter {
+    const socket = net.createConnection(adapter.path);
+    return new SocketDebugAdapter(socket);
+}
+
+export function connectInlineDebugAdapter(adapter: DebugAdapterInlineImplementation): InlineDebugAdapter {
+    return new InlineDebugAdapter(adapter.implementation);
 }

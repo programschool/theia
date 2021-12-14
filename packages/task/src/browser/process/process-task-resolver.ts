@@ -42,7 +42,8 @@ export class ProcessTaskResolver implements TaskResolver {
      * sane default values. Also, resolve all known variables, e.g. `${workspaceFolder}`.
      */
     async resolveTask(taskConfig: TaskConfiguration): Promise<TaskConfiguration> {
-        if (taskConfig.type !== 'process' && taskConfig.type !== 'shell') {
+        const type = taskConfig.taskType || taskConfig.type;
+        if (type !== 'process' && type !== 'shell') {
             throw new Error('Unsupported task configuration type.');
         }
         const context = typeof taskConfig._scope === 'string' ? new URI(taskConfig._scope) : undefined;
@@ -79,7 +80,7 @@ export class ProcessTaskResolver implements TaskResolver {
             } : undefined,
             options: {
                 cwd: await this.variableResolverService.resolve(cwd, variableResolverOptions),
-                env: processTaskConfig.options && processTaskConfig.options.env,
+                env: processTaskConfig.options?.env && await this.variableResolverService.resolve(processTaskConfig.options.env, variableResolverOptions),
                 shell: processTaskConfig.options && processTaskConfig.options.shell
             }
         };

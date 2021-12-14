@@ -19,7 +19,7 @@ import { Event, Emitter, WaitUntilEvent } from '../../common/event';
 import { DisposableCollection } from '../../common/disposable';
 import { CancellationToken } from '../../common/cancellation';
 import { ILogger } from '../../common/logger';
-import { SelectionProvider, } from '../../common/selection-service';
+import { SelectionProvider } from '../../common/selection-service';
 import { Tree, TreeNode, CompositeTreeNode } from './tree';
 import { TreeSelectionService, SelectableTreeNode, TreeSelection } from './tree-selection';
 import { TreeExpansionService, ExpandableTreeNode } from './tree-expansion';
@@ -306,7 +306,7 @@ export class TreeModelImpl implements TreeModel, SelectionProvider<ReadonlyArray
         // Skip the first item. // TODO: clean this up, and skip the first item in a different way without loading everything.
         iterator.next();
         let result = iterator.next();
-        while (!result.done && !SelectableTreeNode.isVisible(result.value)) {
+        while (!result.done && !this.isVisibleSelectableNode(result.value)) {
             result = iterator.next();
         }
         const node = result.value;
@@ -314,6 +314,10 @@ export class TreeModelImpl implements TreeModel, SelectionProvider<ReadonlyArray
             return node;
         }
         return undefined;
+    }
+
+    protected isVisibleSelectableNode(node: TreeNode): node is SelectableTreeNode {
+        return SelectableTreeNode.isVisible(node);
     }
 
     protected createBackwardIterator(node: TreeNode | undefined): TreeIterator | undefined {

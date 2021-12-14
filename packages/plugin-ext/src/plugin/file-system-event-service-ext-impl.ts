@@ -30,11 +30,11 @@
 
 import { Emitter, WaitUntilEvent, AsyncEmitter } from '@theia/core/lib/common/event';
 import { IRelativePattern, parse } from '@theia/callhierarchy/lib/common/glob';
-import { URI, UriComponents } from '@theia/core/shared/vscode-uri';
+import { UriComponents } from '@theia/core/shared/vscode-uri';
+import { Disposable, URI, WorkspaceEdit } from './types-impl';
 import { EditorsAndDocumentsExtImpl as ExtHostDocumentsAndEditors } from './editors-and-documents';
 import type * as vscode from '@theia/plugin';
 import * as typeConverter from './type-converters';
-import { Disposable, WorkspaceEdit } from './types-impl';
 import { FileOperation } from '@theia/filesystem/lib/common/files';
 import { flatten } from '../common/arrays';
 import { CancellationToken } from '@theia/core/lib/common/cancellation';

@@ -18,11 +18,12 @@ import '../../src/browser/style/scm-amend-component.css';
 
 import * as React from '@theia/core/shared/react';
 import { ScmAvatarService } from './scm-avatar-service';
-import { StorageService } from '@theia/core/lib/browser';
+import { codicon, StorageService } from '@theia/core/lib/browser';
 import { Disposable, DisposableCollection } from '@theia/core';
 
 import { ScmRepository } from './scm-repository';
 import { ScmAmendSupport, ScmCommit } from './scm-provider';
+import { nls } from '@theia/core/lib/common/nls';
 
 export interface ScmAmendComponentProps {
     style: React.CSSProperties | undefined,
@@ -298,7 +299,7 @@ export class ScmAmendComponent extends React.Component<ScmAmendComponentProps, S
                         <div>
                             <div id='lastCommit' className='theia-scm-amend'>
                                 <div className='theia-header scm-theia-header'>
-                                    HEAD Commit
+                                    {nls.localize('theia/scm/amendHeadCommit', 'HEAD Commit')}
                                 </div>
                                 {this.renderLastCommit()}
                             </div>
@@ -355,10 +356,10 @@ export class ScmAmendComponent extends React.Component<ScmAmendComponentProps, S
         return <div className='theia-scm-inline-actions-container'>
             <div className='theia-scm-inline-actions'>
                 <div className='theia-scm-inline-action'>
-                    <a className='fa fa-minus' title='Unamend All Commits' onClick={this.unamendAll} />
+                    <a className={codicon('dash')} title='Unamend All Commits' onClick={this.unamendAll} />
                 </div>
                 <div className='theia-scm-inline-action' >
-                    <a className='fa fa-times' title='Clear Amending Commits' onClick={this.clearAmending} />
+                    <a className={codicon('close')} title='Clear Amending Commits' onClick={this.clearAmending} />
                 </div>
             </div>
         </div>;
@@ -375,8 +376,8 @@ export class ScmAmendComponent extends React.Component<ScmAmendComponentProps, S
             {
                 canAmend
                     ? <div className={ScmAmendComponent.Styles.FLEX_CENTER}>
-                        <button className='theia-button' title='Amend last commit' onClick={this.amend}>
-                            Amend
+                        <button className='theia-button' title={nls.localize('theia/scm/amendLastCommit', 'Amend last commit')} onClick={this.amend}>
+                            {nls.localize('theia/scm/amend', 'Amend')}
                         </button>
                     </div>
                     : ''
@@ -451,8 +452,8 @@ export class ScmAmendComponent extends React.Component<ScmAmendComponentProps, S
                 {
                     isOldestAmendCommit
                         ? <div className={ScmAmendComponent.Styles.FLEX_CENTER}>
-                            <button className='theia-button' title='Unamend commit' onClick={this.unamend}>
-                                Unamend
+                            <button className='theia-button' title={nls.localize('theia/scm/unamendCommit', 'Unamend commit')} onClick={this.unamend}>
+                                {nls.localize('theia/scm/unamend', 'Unamend')}
                             </button>
                         </div>
                         : ''

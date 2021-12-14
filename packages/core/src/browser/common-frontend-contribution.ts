@@ -17,18 +17,17 @@
 /* eslint-disable max-len, @typescript-eslint/indent */
 
 import debounce = require('lodash.debounce');
-import { injectable, inject } from 'inversify';
-import { TabBar, Widget } from '@phosphor/widgets';
+import { injectable, inject, optional } from 'inversify';
 import { MAIN_MENU_BAR, SETTINGS_MENU, MenuContribution, MenuModelRegistry, ACCOUNTS_MENU } from '../common/menu';
 import { KeybindingContribution, KeybindingRegistry } from './keybinding';
-import { FrontendApplication, FrontendApplicationContribution } from './frontend-application';
+import { FrontendApplication, FrontendApplicationContribution, OnWillStopAction } from './frontend-application';
 import { CommandContribution, CommandRegistry, Command } from '../common/command';
 import { UriAwareCommandHandler } from '../common/uri-command-handler';
 import { SelectionService } from '../common/selection-service';
 import { MessageService } from '../common/message-service';
 import { OpenerService, open } from '../browser/opener-service';
 import { ApplicationShell } from './shell/application-shell';
-import { SHELL_TABBAR_CONTEXT_MENU } from './shell/tab-bars';
+import { SHELL_TABBAR_CONTEXT_CLOSE, SHELL_TABBAR_CONTEXT_COPY, SHELL_TABBAR_CONTEXT_SPLIT } from './shell/tab-bars';
 import { AboutDialog } from './about-dialog';
 import * as browser from './browser';
 import URI from '../common/uri';
@@ -38,21 +37,27 @@ import { ResourceContextKey } from './resource-context-key';
 import { UriSelection } from '../common/selection';
 import { StorageService } from './storage-service';
 import { Navigatable } from './navigatable';
-import { QuickViewService } from './quick-view-service';
-import { PrefixQuickOpenService, QuickOpenItem, QuickOpenMode, QuickOpenService, QuickOpenGroupItem } from './quick-open';
+import { QuickViewService } from './quick-input/quick-view-service';
 import { environment } from '@theia/application-package/lib/environment';
 import { IconThemeService } from './icon-theme-service';
 import { ColorContribution } from './color-application-contribution';
 import { ColorRegistry, Color } from './color-registry';
-import { CorePreferences } from './core-preferences';
+import { CoreConfiguration, CorePreferences } from './core-preferences';
 import { ThemeService } from './theming';
-import { PreferenceService, PreferenceScope } from './preferences';
+import { PreferenceService, PreferenceScope, PreferenceChangeEvent } from './preferences';
 import { ClipboardService } from './clipboard-service';
 import { EncodingRegistry } from './encoding-registry';
 import { UTF8 } from '../common/encodings';
 import { EnvVariablesServer } from '../common/env-variables';
 import { AuthenticationService } from './authentication-service';
-import { FormatType } from './saveable';
+import { FormatType, Saveable } from './saveable';
+import { QuickInputService, QuickPick, QuickPickItem } from './quick-input';
+import { AsyncLocalizationProvider } from '../common/i18n/localization';
+import { nls } from '../common/nls';
+import { CurrentWidgetCommandAdapter } from './shell/current-widget-command-adapter';
+import { ConfirmDialog, confirmExit, Dialog } from './dialogs';
+import { WindowService } from './window/window-service';
+import { FrontendApplicationConfigProvider } from './frontend-application-config-provider';
 
 export namespace CommonMenus {
 
@@ -88,187 +93,206 @@ export namespace CommonMenus {
 
 export namespace CommonCommands {
 
-    const FILE_CATEGORY = 'File';
-    const VIEW_CATEGORY = 'View';
+    export const FILE_CATEGORY = 'File';
+    export const VIEW_CATEGORY = 'View';
+    export const PREFERENCES_CATEGORY = 'Preferences';
+    export const FILE_CATEGORY_KEY = nls.getDefaultKey(FILE_CATEGORY);
+    export const VIEW_CATEGORY_KEY = nls.getDefaultKey(VIEW_CATEGORY);
+    export const PREFERENCES_CATEGORY_KEY = nls.getDefaultKey(PREFERENCES_CATEGORY);
 
     export const OPEN: Command = {
         id: 'core.open',
     };
 
-    export const CUT: Command = {
+    export const CUT = Command.toDefaultLocalizedCommand({
         id: 'core.cut',
         label: 'Cut'
-    };
-    export const COPY: Command = {
+    });
+    export const COPY = Command.toDefaultLocalizedCommand({
         id: 'core.copy',
         label: 'Copy'
-    };
-    export const PASTE: Command = {
+    });
+    export const PASTE = Command.toDefaultLocalizedCommand({
         id: 'core.paste',
         label: 'Paste'
-    };
+    });
 
-    export const COPY_PATH: Command = {
+    export const COPY_PATH = Command.toDefaultLocalizedCommand({
         id: 'core.copy.path',
         label: 'Copy Path'
-    };
+    });
 
-    export const UNDO: Command = {
+    export const UNDO = Command.toDefaultLocalizedCommand({
         id: 'core.undo',
         label: 'Undo'
-    };
-    export const REDO: Command = {
+    });
+    export const REDO = Command.toDefaultLocalizedCommand({
         id: 'core.redo',
         label: 'Redo'
-    };
-    export const SELECT_ALL: Command = {
+    });
+    export const SELECT_ALL = Command.toDefaultLocalizedCommand({
         id: 'core.selectAll',
         label: 'Select All'
-    };
+    });
 
-    export const FIND: Command = {
+    export const FIND = Command.toDefaultLocalizedCommand({
         id: 'core.find',
         label: 'Find'
-    };
-    export const REPLACE: Command = {
+    });
+    export const REPLACE = Command.toDefaultLocalizedCommand({
         id: 'core.replace',
         label: 'Replace'
-    };
+    });
 
-    export const NEXT_TAB: Command = {
+    export const NEXT_TAB = Command.toDefaultLocalizedCommand({
         id: 'core.nextTab',
         category: VIEW_CATEGORY,
-        label: 'Switch to Next Tab'
-    };
-    export const PREVIOUS_TAB: Command = {
+        label: 'Show Next Tab'
+    });
+    export const PREVIOUS_TAB = Command.toDefaultLocalizedCommand({
         id: 'core.previousTab',
         category: VIEW_CATEGORY,
-        label: 'Switch to Previous Tab'
-    };
-    export const NEXT_TAB_IN_GROUP: Command = {
+        label: 'Show Previous Tab'
+    });
+    export const NEXT_TAB_IN_GROUP = Command.toLocalizedCommand({
         id: 'core.nextTabInGroup',
         category: VIEW_CATEGORY,
         label: 'Switch to Next Tab in Group'
-    };
-    export const PREVIOUS_TAB_IN_GROUP: Command = {
+    }, 'theia/core/common/showNextTabInGroup', VIEW_CATEGORY_KEY);
+    export const PREVIOUS_TAB_IN_GROUP = Command.toLocalizedCommand({
         id: 'core.previousTabInGroup',
         category: VIEW_CATEGORY,
         label: 'Switch to Previous Tab in Group'
-    };
-    export const NEXT_TAB_GROUP: Command = {
+    }, 'theia/core/common/showPreviousTabInGroup', VIEW_CATEGORY_KEY);
+    export const NEXT_TAB_GROUP = Command.toLocalizedCommand({
         id: 'core.nextTabGroup',
         category: VIEW_CATEGORY,
         label: 'Switch to Next Tab Group'
-    };
-    export const PREVIOUS_TAB_GROUP: Command = {
+    }, 'theia/core/common/showNextTabGroup', VIEW_CATEGORY_KEY);
+    export const PREVIOUS_TAB_GROUP = Command.toLocalizedCommand({
         id: 'core.previousTabBar',
         category: VIEW_CATEGORY,
         label: 'Switch to Previous Tab Group'
-    };
-    export const CLOSE_TAB: Command = {
+    }, 'theia/core/common/showPreviousTabGroup', VIEW_CATEGORY_KEY);
+    export const CLOSE_TAB = Command.toLocalizedCommand({
         id: 'core.close.tab',
         category: VIEW_CATEGORY,
         label: 'Close Tab'
-    };
-    export const CLOSE_OTHER_TABS: Command = {
+    }, 'theia/core/common/closeTab', VIEW_CATEGORY_KEY);
+    export const CLOSE_OTHER_TABS = Command.toLocalizedCommand({
         id: 'core.close.other.tabs',
         category: VIEW_CATEGORY,
         label: 'Close Other Tabs'
-    };
-    export const CLOSE_RIGHT_TABS: Command = {
+    }, 'theia/core/common/closeOthers', VIEW_CATEGORY_KEY);
+    export const CLOSE_SAVED_TABS = Command.toDefaultLocalizedCommand({
+        id: 'workbench.action.closeUnmodifiedEditors',
+        category: VIEW_CATEGORY,
+        label: 'Close Saved Editors in Group',
+    });
+    export const CLOSE_RIGHT_TABS = Command.toLocalizedCommand({
         id: 'core.close.right.tabs',
         category: VIEW_CATEGORY,
         label: 'Close Tabs to the Right'
-    };
-    export const CLOSE_ALL_TABS: Command = {
+    }, 'theia/core/common/closeRight', VIEW_CATEGORY_KEY);
+    export const CLOSE_ALL_TABS = Command.toLocalizedCommand({
         id: 'core.close.all.tabs',
         category: VIEW_CATEGORY,
         label: 'Close All Tabs'
-    };
-    export const CLOSE_MAIN_TAB: Command = {
+    }, 'theia/core/common/closeAll', VIEW_CATEGORY_KEY);
+    export const CLOSE_MAIN_TAB = Command.toLocalizedCommand({
         id: 'core.close.main.tab',
         category: VIEW_CATEGORY,
         label: 'Close Tab in Main Area'
-    };
-    export const CLOSE_OTHER_MAIN_TABS: Command = {
+    }, 'theia/core/common/closeTabMain', VIEW_CATEGORY_KEY);
+    export const CLOSE_OTHER_MAIN_TABS = Command.toLocalizedCommand({
         id: 'core.close.other.main.tabs',
         category: VIEW_CATEGORY,
         label: 'Close Other Tabs in Main Area'
-    };
-    export const CLOSE_ALL_MAIN_TABS: Command = {
+    }, 'theia/core/common/closeOtherTabMain', VIEW_CATEGORY_KEY);
+    export const CLOSE_ALL_MAIN_TABS = Command.toLocalizedCommand({
         id: 'core.close.all.main.tabs',
         category: VIEW_CATEGORY,
         label: 'Close All Tabs in Main Area'
-    };
-    export const COLLAPSE_PANEL: Command = {
+    }, 'theia/core/common/closeAllTabMain', VIEW_CATEGORY_KEY);
+    export const COLLAPSE_PANEL = Command.toLocalizedCommand({
         id: 'core.collapse.tab',
         category: VIEW_CATEGORY,
         label: 'Collapse Side Panel'
-    };
-    export const COLLAPSE_ALL_PANELS: Command = {
+    }, 'theia/core/common/collapseTab', VIEW_CATEGORY_KEY);
+    export const COLLAPSE_ALL_PANELS = Command.toLocalizedCommand({
         id: 'core.collapse.all.tabs',
         category: VIEW_CATEGORY,
         label: 'Collapse All Side Panels'
-    };
-    export const TOGGLE_BOTTOM_PANEL: Command = {
+    }, 'theia/core/common/collapseAllTabs', VIEW_CATEGORY_KEY);
+    export const TOGGLE_BOTTOM_PANEL = Command.toLocalizedCommand({
         id: 'core.toggle.bottom.panel',
         category: VIEW_CATEGORY,
         label: 'Toggle Bottom Panel'
-    };
-    export const TOGGLE_MAXIMIZED: Command = {
+    }, 'theia/core/common/collapseBottomPanel', VIEW_CATEGORY_KEY);
+    export const TOGGLE_STATUS_BAR = Command.toDefaultLocalizedCommand({
+        id: 'workbench.action.toggleStatusbarVisibility',
+        category: VIEW_CATEGORY,
+        label: 'Toggle Status Bar Visibility'
+    });
+    export const TOGGLE_MAXIMIZED = Command.toLocalizedCommand({
         id: 'core.toggleMaximized',
         category: VIEW_CATEGORY,
         label: 'Toggle Maximized'
-    };
-    export const OPEN_VIEW: Command = {
+    }, 'theia/core/common/toggleMaximized', VIEW_CATEGORY_KEY);
+    export const OPEN_VIEW = Command.toDefaultLocalizedCommand({
         id: 'core.openView',
         category: VIEW_CATEGORY,
         label: 'Open View...'
-    };
+    });
 
-    export const SAVE: Command = {
+    export const SAVE = Command.toDefaultLocalizedCommand({
         id: 'core.save',
         category: FILE_CATEGORY,
         label: 'Save',
-    };
-    export const SAVE_WITHOUT_FORMATTING: Command = {
+    });
+    export const SAVE_WITHOUT_FORMATTING = Command.toDefaultLocalizedCommand({
         id: 'core.saveWithoutFormatting',
         category: FILE_CATEGORY,
         label: 'Save without Formatting',
-    };
-    export const SAVE_ALL: Command = {
+    });
+    export const SAVE_ALL = Command.toDefaultLocalizedCommand({
         id: 'core.saveAll',
         category: FILE_CATEGORY,
         label: 'Save All',
-    };
+    });
 
-    export const AUTO_SAVE: Command = {
+    export const AUTO_SAVE = Command.toDefaultLocalizedCommand({
         id: 'textEditor.commands.autosave',
         category: FILE_CATEGORY,
         label: 'Auto Save',
-    };
+    });
 
-    export const ABOUT_COMMAND: Command = {
+    export const ABOUT_COMMAND = Command.toDefaultLocalizedCommand({
         id: 'core.about',
         label: 'About'
-    };
+    });
 
-    export const OPEN_PREFERENCES: Command = {
+    export const OPEN_PREFERENCES = Command.toDefaultLocalizedCommand({
         id: 'preferences:open',
-        category: 'Settings',
-        label: 'Open Preferences',
-    };
+        category: PREFERENCES_CATEGORY,
+        label: 'Open Settings (UI)',
+    });
 
-    export const SELECT_COLOR_THEME: Command = {
+    export const SELECT_COLOR_THEME = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.selectTheme',
         label: 'Color Theme',
-        category: 'Preferences'
-    };
-    export const SELECT_ICON_THEME: Command = {
+        category: PREFERENCES_CATEGORY
+    });
+    export const SELECT_ICON_THEME = Command.toDefaultLocalizedCommand({
         id: 'workbench.action.selectIconTheme',
         label: 'File Icon Theme',
-        category: 'Preferences'
-    };
+        category: PREFERENCES_CATEGORY
+    });
+
+    export const CONFIGURE_DISPLAY_LANGUAGE = Command.toDefaultLocalizedCommand({
+        id: 'workbench.action.configureLanguage',
+        label: 'Configure Display Language'
+    });
 
 }
 
@@ -289,7 +313,8 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         @inject(SelectionService) protected readonly selectionService: SelectionService,
         @inject(MessageService) protected readonly messageService: MessageService,
         @inject(OpenerService) protected readonly openerService: OpenerService,
-        @inject(AboutDialog) protected readonly aboutDialog: AboutDialog
+        @inject(AboutDialog) protected readonly aboutDialog: AboutDialog,
+        @inject(AsyncLocalizationProvider) protected readonly localizationProvider: AsyncLocalizationProvider
     ) { }
 
     @inject(ContextKeyService)
@@ -304,20 +329,14 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
     @inject(StorageService)
     protected readonly storageService: StorageService;
 
-    @inject(QuickViewService)
-    protected readonly quickView: QuickViewService;
-
-    @inject(PrefixQuickOpenService)
-    protected readonly quickOpen: PrefixQuickOpenService;
+    @inject(QuickInputService) @optional()
+    protected readonly quickInputService: QuickInputService;
 
     @inject(IconThemeService)
     protected readonly iconThemes: IconThemeService;
 
     @inject(ThemeService)
     protected readonly themeService: ThemeService;
-
-    @inject(QuickOpenService)
-    protected readonly quickOpenService: QuickOpenService;
 
     @inject(CorePreferences)
     protected readonly preferences: CorePreferences;
@@ -336,6 +355,9 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
 
     @inject(AuthenticationService)
     protected readonly authenticationService: AuthenticationService;
+
+    @inject(WindowService)
+    protected readonly windowService: WindowService;
 
     async configure(app: FrontendApplication): Promise<void> {
         const configDirUri = await this.environments.getConfigDirUri();
@@ -356,36 +378,30 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         this.updateStyles();
         this.updateThemeFromPreference('workbench.colorTheme');
         this.updateThemeFromPreference('workbench.iconTheme');
-        this.preferences.onPreferenceChanged(e => {
-            if (e.preferenceName === 'workbench.editor.highlightModifiedTabs') {
-                this.updateStyles();
-            } else if (e.preferenceName === 'workbench.colorTheme' || e.preferenceName === 'workbench.iconTheme') {
-                this.updateThemeFromPreference(e.preferenceName);
-            }
-        });
-        this.themeService.onThemeChange(() => this.updateThemePreference('workbench.colorTheme'));
+        this.preferences.onPreferenceChanged(e => this.handlePreferenceChange(e, app));
+        this.themeService.onDidColorThemeChange(() => this.updateThemePreference('workbench.colorTheme'));
         this.iconThemes.onDidChangeCurrent(() => this.updateThemePreference('workbench.iconTheme'));
 
-        app.shell.leftPanelHandler.addMenu({
+        app.shell.leftPanelHandler.addBottomMenu({
             id: 'settings-menu',
             iconClass: 'codicon codicon-settings-gear',
-            title: 'Settings',
+            title: nls.localizeByDefault(CommonCommands.PREFERENCES_CATEGORY),
             menuPath: SETTINGS_MENU,
             order: 0,
         });
         const accountsMenu = {
             id: 'accounts-menu',
             iconClass: 'codicon codicon-person',
-            title: 'Accounts',
+            title: nls.localizeByDefault('Accounts'),
             menuPath: ACCOUNTS_MENU,
             order: 1,
         };
         this.authenticationService.onDidRegisterAuthenticationProvider(() => {
-            app.shell.leftPanelHandler.addMenu(accountsMenu);
+            app.shell.leftPanelHandler.addBottomMenu(accountsMenu);
         });
         this.authenticationService.onDidUnregisterAuthenticationProvider(() => {
             if (this.authenticationService.getProviderIds().length === 0) {
-                app.shell.leftPanelHandler.removeMenu(accountsMenu.id);
+                app.shell.leftPanelHandler.removeBottomMenu(accountsMenu.id);
             }
         });
     }
@@ -423,6 +439,36 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         }
     }
 
+    protected handlePreferenceChange(e: PreferenceChangeEvent<CoreConfiguration>, app: FrontendApplication): void {
+        switch (e.preferenceName) {
+            case 'workbench.editor.highlightModifiedTabs': {
+                this.updateStyles();
+                break;
+            }
+            case 'workbench.colorTheme':
+            case 'workbench.iconTheme': {
+                this.updateThemeFromPreference(e.preferenceName);
+                break;
+            }
+            case 'window.menuBarVisibility': {
+                const { newValue } = e;
+                const mainMenuId = 'main-menu';
+                if (newValue === 'compact') {
+                    this.shell.leftPanelHandler.addTopMenu({
+                        id: mainMenuId,
+                        iconClass: 'codicon codicon-menu',
+                        title: nls.localizeByDefault('Application Menu'),
+                        menuPath: ['menubar'],
+                        order: 0,
+                    });
+                } else {
+                    app.shell.leftPanelHandler.removeTopMenu(mainMenuId);
+                }
+                break;
+            }
+        }
+    }
+
     onStart(): void {
         this.storageService.getData<{ recent: Command[] }>(RECENT_COMMANDS_STORAGE_KEY, { recent: [] })
             .then(tasks => this.commandRegistry.recent = tasks.recent);
@@ -444,10 +490,10 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
     }
 
     registerMenus(registry: MenuModelRegistry): void {
-        registry.registerSubmenu(CommonMenus.FILE, 'File');
-        registry.registerSubmenu(CommonMenus.EDIT, 'Edit');
-        registry.registerSubmenu(CommonMenus.VIEW, 'View');
-        registry.registerSubmenu(CommonMenus.HELP, 'Help');
+        registry.registerSubmenu(CommonMenus.FILE, nls.localizeByDefault('File'));
+        registry.registerSubmenu(CommonMenus.EDIT, nls.localizeByDefault('Edit'));
+        registry.registerSubmenu(CommonMenus.VIEW, nls.localizeByDefault('View'));
+        registry.registerSubmenu(CommonMenus.HELP, nls.localizeByDefault('Help'));
 
         registry.registerMenuAction(CommonMenus.FILE_SAVE, {
             commandId: CommonCommands.SAVE.id
@@ -460,7 +506,7 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
             commandId: CommonCommands.AUTO_SAVE.id
         });
 
-        registry.registerSubmenu(CommonMenus.FILE_SETTINGS_SUBMENU, 'Settings');
+        registry.registerSubmenu(CommonMenus.FILE_SETTINGS_SUBMENU, nls.localizeByDefault(CommonCommands.PREFERENCES_CATEGORY));
 
         registry.registerMenuAction(CommonMenus.EDIT_UNDO, {
             commandId: CommonCommands.UNDO.id,
@@ -502,43 +548,58 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
             order: '0'
         });
         registry.registerMenuAction(CommonMenus.VIEW_LAYOUT, {
+            commandId: CommonCommands.TOGGLE_STATUS_BAR.id,
+            order: '1',
+            label: 'Toggle Status Bar'
+        });
+        registry.registerMenuAction(CommonMenus.VIEW_LAYOUT, {
             commandId: CommonCommands.COLLAPSE_ALL_PANELS.id,
-            order: '1'
-        });
-
-        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_MENU, {
-            commandId: CommonCommands.CLOSE_TAB.id,
-            label: 'Close',
-            order: '0'
-        });
-        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_MENU, {
-            commandId: CommonCommands.CLOSE_OTHER_TABS.id,
-            label: 'Close Others',
-            order: '1'
-        });
-        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_MENU, {
-            commandId: CommonCommands.CLOSE_RIGHT_TABS.id,
-            label: 'Close to the Right',
             order: '2'
         });
-        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_MENU, {
-            commandId: CommonCommands.CLOSE_ALL_TABS.id,
-            label: 'Close All',
-            order: '3'
+
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_CLOSE, {
+            commandId: CommonCommands.CLOSE_TAB.id,
+            label: nls.localizeByDefault('Close'),
+            order: '0'
         });
-        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_MENU, {
-            commandId: CommonCommands.COLLAPSE_PANEL.id,
-            label: 'Collapse',
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_CLOSE, {
+            commandId: CommonCommands.CLOSE_OTHER_TABS.id,
+            label: nls.localizeByDefault('Close Others'),
+            order: '1'
+        });
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_CLOSE, {
+            commandId: CommonCommands.CLOSE_RIGHT_TABS.id,
+            label: nls.localizeByDefault('Close to the Right'),
+            order: '2'
+        });
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_CLOSE, {
+            commandId: CommonCommands.CLOSE_SAVED_TABS.id,
+            label: nls.localizeByDefault('Close Saved'),
+            order: '3',
+        });
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_CLOSE, {
+            commandId: CommonCommands.CLOSE_ALL_TABS.id,
+            label: nls.localizeByDefault('Close All'),
             order: '4'
         });
-        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_MENU, {
-            commandId: CommonCommands.TOGGLE_MAXIMIZED.id,
-            label: 'Toggle Maximized',
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_SPLIT, {
+            commandId: CommonCommands.COLLAPSE_PANEL.id,
+            label: CommonCommands.COLLAPSE_PANEL.label,
             order: '5'
+        });
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_SPLIT, {
+            commandId: CommonCommands.TOGGLE_MAXIMIZED.id,
+            label: CommonCommands.TOGGLE_MAXIMIZED.label,
+            order: '6'
+        });
+        registry.registerMenuAction(SHELL_TABBAR_CONTEXT_COPY, {
+            commandId: CommonCommands.COPY_PATH.id,
+            label: CommonCommands.COPY_PATH.label,
+            order: '1',
         });
         registry.registerMenuAction(CommonMenus.HELP, {
             commandId: CommonCommands.ABOUT_COMMAND.id,
-            label: 'About',
+            label: CommonCommands.ABOUT_COMMAND.label,
             order: '9'
         });
 
@@ -593,6 +654,8 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
             }
         });
         commandRegistry.registerCommand(CommonCommands.COPY_PATH, UriAwareCommandHandler.MultiSelect(this.selectionService, {
+            isVisible: uris => Array.isArray(uris) && uris.some(uri => uri instanceof URI),
+            isEnabled: uris => Array.isArray(uris) && uris.some(uri => uri instanceof URI),
             execute: async uris => {
                 if (uris.length) {
                     const lineDelimiter = isWindows ? '\r\n' : '\n';
@@ -645,62 +708,45 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
             isEnabled: () => this.shell.previousTabBar() !== undefined,
             execute: () => this.shell.activatePreviousTabBar()
         });
-        commandRegistry.registerCommand(CommonCommands.CLOSE_TAB, {
-            isEnabled: (event?: Event) => {
-                const tabBar = this.shell.findTabBar(event);
-                if (!tabBar) {
-                    return false;
-                }
-                const currentTitle = this.shell.findTitle(tabBar, event);
-                return currentTitle !== undefined && currentTitle.closable;
+        commandRegistry.registerCommand(CommonCommands.CLOSE_TAB, new CurrentWidgetCommandAdapter(this.shell, {
+            isEnabled: title => Boolean(title?.closable),
+            execute: (title, tabBar) => tabBar && this.shell.closeTabs(tabBar, candidate => candidate === title),
+        }));
+        commandRegistry.registerCommand(CommonCommands.CLOSE_OTHER_TABS, new CurrentWidgetCommandAdapter(this.shell, {
+            isEnabled: (title, tabbar) => Boolean(tabbar?.titles.some(candidate => candidate !== title && candidate.closable)),
+            execute: (title, tabbar) => tabbar && this.shell.closeTabs(tabbar, candidate => candidate !== title && candidate.closable),
+        }));
+        commandRegistry.registerCommand(CommonCommands.CLOSE_SAVED_TABS, new CurrentWidgetCommandAdapter(this.shell, {
+            isEnabled: (_title, tabbar) => Boolean(tabbar?.titles.some(candidate => candidate.closable && !Saveable.isDirty(candidate.owner))),
+            execute: (_title, tabbar) => tabbar && this.shell.closeTabs(tabbar, candidate => candidate.closable && !Saveable.isDirty(candidate.owner)),
+        }));
+        commandRegistry.registerCommand(CommonCommands.CLOSE_RIGHT_TABS, new CurrentWidgetCommandAdapter(this.shell, {
+            isEnabled: (title, tabbar) => {
+                let targetSeen = false;
+                return Boolean(tabbar?.titles.some(candidate => {
+                    if (targetSeen && candidate.closable) { return true; };
+                    if (candidate === title) { targetSeen = true; };
+                }));
             },
-            execute: (event?: Event) => {
-                const tabBar = this.shell.findTabBar(event)!;
-                const currentTitle = this.shell.findTitle(tabBar, event);
-                this.shell.closeTabs(tabBar, title => title === currentTitle);
-            }
-        });
-        commandRegistry.registerCommand(CommonCommands.CLOSE_OTHER_TABS, {
-            isEnabled: (event?: Event) => {
-                const tabBar = this.shell.findTabBar(event);
-                if (!tabBar) {
-                    return false;
-                }
-                const currentTitle = this.shell.findTitle(tabBar, event);
-                return tabBar.titles.some(title => title !== currentTitle && title.closable);
-            },
-            execute: (event?: Event) => {
-                const tabBar = this.shell.findTabBar(event)!;
-                const currentTitle = this.shell.findTitle(tabBar, event);
-                this.shell.closeTabs(tabBar, title => title !== currentTitle && title.closable);
-            }
-        });
-        commandRegistry.registerCommand(CommonCommands.CLOSE_RIGHT_TABS, {
-            isEnabled: (event?: Event) => {
-                const tabBar = this.shell.findTabBar(event);
-                if (!tabBar) {
-                    return false;
-                }
-                const currentIndex = this.findTitleIndex(tabBar, event);
-                return tabBar.titles.some((title, index) => index > currentIndex && title.closable);
-            },
-            isVisible: (event?: Event) => {
-                const area = this.findTabArea(event);
+            isVisible: (_title, tabbar) => {
+                const area = (tabbar && this.shell.getAreaFor(tabbar)) ?? this.shell.currentTabArea;
                 return area !== undefined && area !== 'left' && area !== 'right';
             },
-            execute: (event?: Event) => {
-                const tabBar = this.shell.findTabBar(event)!;
-                const currentIndex = this.findTitleIndex(tabBar, event);
-                this.shell.closeTabs(tabBar, (title, index) => index > currentIndex && title.closable);
+            execute: (title, tabbar) => {
+                if (tabbar) {
+                    let targetSeen = false;
+                    this.shell.closeTabs(tabbar, candidate => {
+                        if (targetSeen && candidate.closable) { return true; };
+                        if (candidate === title) { targetSeen = true; };
+                        return false;
+                    });
+                }
             }
-        });
-        commandRegistry.registerCommand(CommonCommands.CLOSE_ALL_TABS, {
-            isEnabled: (event?: Event) => {
-                const tabBar = this.shell.findTabBar(event);
-                return tabBar !== undefined && tabBar.titles.some(title => title.closable);
-            },
-            execute: (event?: Event) => this.shell.closeTabs(this.shell.findTabBar(event)!, title => title.closable)
-        });
+        }));
+        commandRegistry.registerCommand(CommonCommands.CLOSE_ALL_TABS, new CurrentWidgetCommandAdapter(this.shell, {
+            isEnabled: (_title, tabbar) => Boolean(tabbar?.titles.some(title => title.closable)),
+            execute: (_title, tabbar) => tabbar && this.shell.closeTabs(tabbar, candidate => candidate.closable),
+        }));
         commandRegistry.registerCommand(CommonCommands.CLOSE_MAIN_TAB, {
             isEnabled: () => {
                 const currentWidget = this.shell.getCurrentWidget('main');
@@ -723,11 +769,11 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
             isEnabled: () => this.shell.mainAreaTabBars.some(tb => tb.titles.some(title => title.closable)),
             execute: () => this.shell.closeTabs('main', title => title.closable)
         });
-        commandRegistry.registerCommand(CommonCommands.COLLAPSE_PANEL, {
-            isEnabled: (event?: Event) => ApplicationShell.isSideArea(this.findTabArea(event)),
-            isVisible: (event?: Event) => ApplicationShell.isSideArea(this.findTabArea(event)),
-            execute: (event?: Event) => this.shell.collapsePanel(this.findTabArea(event)!)
-        });
+        commandRegistry.registerCommand(CommonCommands.COLLAPSE_PANEL, new CurrentWidgetCommandAdapter(this.shell, {
+            isEnabled: (_title, tabbar) => Boolean(tabbar && ApplicationShell.isSideArea(this.shell.getAreaFor(tabbar))),
+            isVisible: (_title, tabbar) => Boolean(tabbar && ApplicationShell.isSideArea(this.shell.getAreaFor(tabbar))),
+            execute: (_title, tabbar) => tabbar && this.shell.collapsePanel(this.shell.getAreaFor(tabbar)!)
+        }));
         commandRegistry.registerCommand(CommonCommands.COLLAPSE_ALL_PANELS, {
             execute: () => {
                 this.shell.collapsePanel('left');
@@ -745,11 +791,14 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
                 }
             }
         });
-        commandRegistry.registerCommand(CommonCommands.TOGGLE_MAXIMIZED, {
-            isEnabled: (event?: Event) => this.canToggleMaximized(event),
-            isVisible: (event?: Event) => this.canToggleMaximized(event),
-            execute: (event?: Event) => this.toggleMaximized(event)
+        commandRegistry.registerCommand(CommonCommands.TOGGLE_STATUS_BAR, {
+            execute: () => this.preferenceService.updateValue('workbench.statusBar.visible', !this.preferences['workbench.statusBar.visible'])
         });
+        commandRegistry.registerCommand(CommonCommands.TOGGLE_MAXIMIZED, new CurrentWidgetCommandAdapter(this.shell, {
+            isEnabled: title => Boolean(title?.owner && this.shell.canToggleMaximized(title?.owner)),
+            isVisible: title => Boolean(title?.owner && this.shell.canToggleMaximized(title?.owner)),
+            execute: title => title?.owner && this.shell.toggleMaximized(title?.owner),
+        }));
 
         commandRegistry.registerCommand(CommonCommands.SAVE, {
             execute: () => this.shell.save({ formatType: FormatType.ON })
@@ -765,7 +814,7 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         });
 
         commandRegistry.registerCommand(CommonCommands.OPEN_VIEW, {
-            execute: () => this.quickOpen.open(this.quickView.prefix)
+            execute: () => this.quickInputService?.open(QuickViewService.PREFIX)
         });
 
         commandRegistry.registerCommand(CommonCommands.SELECT_COLOR_THEME, {
@@ -774,63 +823,10 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         commandRegistry.registerCommand(CommonCommands.SELECT_ICON_THEME, {
             execute: () => this.selectIconTheme()
         });
-    }
 
-    private findTabArea(event?: Event): ApplicationShell.Area | undefined {
-        const tabBar = this.shell.findTabBar(event);
-        if (tabBar) {
-            return this.shell.getAreaFor(tabBar);
-        }
-        return this.shell.currentTabArea;
-    }
-
-    /**
-     * Finds the index of the selected title from the tab-bar.
-     * @param tabBar: used for providing an array of titles.
-     * @returns the index of the selected title if it is available in the tab-bar, else returns the index of currently-selected title.
-     */
-    private findTitleIndex(tabBar: TabBar<Widget>, event?: Event): number {
-        if (event) {
-            const targetTitle = this.shell.findTitle(tabBar, event);
-            return targetTitle ? tabBar.titles.indexOf(targetTitle) : tabBar.currentIndex;
-        }
-        return tabBar.currentIndex;
-    }
-
-    private canToggleMaximized(event?: Event): boolean {
-        if (event?.target instanceof HTMLElement) {
-            const widget = this.shell.findWidgetForElement(event.target);
-            if (widget) {
-                return this.shell.mainPanel.contains(widget) || this.shell.bottomPanel.contains(widget);
-            }
-        }
-        return this.shell.canToggleMaximized();
-    }
-
-    /**
-     * Maximize the bottom or the main dockpanel based on the widget.
-     * @param event used to find the selected widget.
-     */
-    private toggleMaximized(event?: Event): void {
-        if (event?.target instanceof HTMLElement) {
-            const widget = this.shell.findWidgetForElement(event.target);
-            if (widget) {
-                if (this.shell.mainPanel.contains(widget)) {
-                    this.shell.mainPanel.toggleMaximized();
-                } else if (this.shell.bottomPanel.contains(widget)) {
-                    this.shell.bottomPanel.toggleMaximized();
-                }
-                if (widget instanceof TabBar) {
-                    // reveals the widget when maximized.
-                    const title = this.shell.findTitle(widget, event);
-                    if (title) {
-                        this.shell.revealWidget(title.owner.id);
-                    }
-                }
-            }
-        } else {
-            this.shell.toggleMaximized();
-        }
+        commandRegistry.registerCommand(CommonCommands.CONFIGURE_DISPLAY_LANGUAGE, {
+            execute: () => this.configureDisplayLanguage()
+        });
     }
 
     private isElectron(): boolean {
@@ -977,96 +973,125 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
         });
     }
 
-    onWillStop(): true | undefined {
+    onWillStop(): OnWillStopAction | undefined {
         try {
             if (this.shouldPreventClose || this.shell.canSaveAll()) {
-                return true;
+                return { reason: 'Dirty editors present', action: () => confirmExit() };
             }
         } finally {
             this.shouldPreventClose = false;
         }
     }
 
+    protected async configureDisplayLanguage(): Promise<void> {
+        const availableLanguages = await this.localizationProvider.getAvailableLanguages();
+        const items: QuickPickItem[] = [];
+        for (const additionalLanguage of ['en', ...availableLanguages]) {
+            items.push({
+                label: additionalLanguage,
+                execute: async () => {
+                    if (additionalLanguage !== nls.locale && await this.confirmRestart()) {
+                        this.windowService.setSafeToShutDown();
+                        window.localStorage.setItem(nls.localeId, additionalLanguage);
+                        this.windowService.reload();
+                    }
+                }
+            });
+        }
+        this.quickInputService?.showQuickPick(items,
+            {
+                placeholder: CommonCommands.CONFIGURE_DISPLAY_LANGUAGE.label,
+                activeItem: items.find(item => item.label === (nls.locale || 'en'))
+            });
+    }
+
+    protected async confirmRestart(): Promise<boolean> {
+        const shouldRestart = await new ConfirmDialog({
+            title: nls.localizeByDefault('A restart is required for the change in display language to take effect.'),
+            msg: nls.localizeByDefault('Press the restart button to restart {0} and change the display language.', FrontendApplicationConfigProvider.get().applicationName),
+            ok: nls.localizeByDefault('Restart'),
+            cancel: Dialog.CANCEL,
+        }).open();
+        return shouldRestart === true;
+    }
+
     protected selectIconTheme(): void {
         let resetTo: string | undefined = this.iconThemes.current;
         const previewTheme = debounce((id: string) => this.iconThemes.current = id, 200);
 
-        let items: (QuickOpenItem & { id: string })[] = [];
+        let items: Array<QuickPickItem> = [];
         for (const iconTheme of this.iconThemes.definitions) {
-            const item = Object.assign(new QuickOpenItem({
+            items.push({
+                id: iconTheme.id,
                 label: iconTheme.label,
                 description: iconTheme.description,
-                run: (mode: QuickOpenMode) => {
-                    if (mode === QuickOpenMode.OPEN) {
-                        resetTo = undefined;
-                    }
-                    previewTheme(iconTheme.id);
-                    return true;
-                }
-            }), { id: iconTheme.id });
-            items.push(item);
+            });
         }
         items = items.sort((a, b) => {
             if (a.id === 'none') {
                 return -1;
             }
-            return a.getLabel()!.localeCompare(b.getLabel()!);
+            return a.label!.localeCompare(b.label!);
         });
-        this.quickOpenService.open({
-            onType: (_, accept) => accept(items)
-        }, {
-            placeholder: 'Select File Icon Theme',
-            fuzzyMatchLabel: true,
-            selectIndex: () => items.findIndex(item => item.id === this.iconThemes.current),
-            onClose: () => {
-                if (resetTo) {
-                    previewTheme.cancel();
-                    this.iconThemes.current = resetTo;
+
+        this.quickInputService?.showQuickPick(items,
+            {
+                placeholder: nls.localizeByDefault('Select File Icon Theme'),
+                activeItem: items.find(item => item.id === resetTo),
+                onDidChangeSelection: (quickPick: QuickPick<QuickPickItem>, selectedItems: Array<QuickPickItem>) => {
+                    resetTo = undefined;
+                    previewTheme(selectedItems[0].id!);
+                },
+                onDidChangeActive: (quickPick: QuickPick<QuickPickItem>, activeItems: Array<QuickPickItem>) => {
+                    previewTheme(activeItems[0].id!);
+                },
+                onDidHide: () => {
+                    if (resetTo) {
+                        this.iconThemes.current = resetTo;
+                    }
                 }
-            }
-        });
+            });
     }
 
     protected selectColorTheme(): void {
         let resetTo: string | undefined = this.themeService.getCurrentTheme().id;
         const previewTheme = debounce((id: string) => this.themeService.setCurrentTheme(id), 200);
 
-        type ThemeQuickOpenItem = QuickOpenItem & { id: string };
-        const itemsByTheme: { light: ThemeQuickOpenItem[], dark: ThemeQuickOpenItem[], hc: ThemeQuickOpenItem[] } = { light: [], dark: [], hc: [] };
+        const itemsByTheme: { light: Array<QuickPickItem>, dark: Array<QuickPickItem>, hc: Array<QuickPickItem> } = { light: [], dark: [], hc: [] };
         for (const theme of this.themeService.getThemes().sort((a, b) => a.label.localeCompare(b.label))) {
             const themeItems = itemsByTheme[theme.type];
-            const groupLabel = themeItems.length === 0 ? (theme.type === 'hc' ? 'high contrast' : theme.type) + ' themes' : undefined;
-            themeItems.push(Object.assign(new QuickOpenGroupItem({
+            if (themeItems.length === 0) {
+                themeItems.push({
+                    type: 'separator',
+                    label: (theme.type === 'hc' ? 'high contrast' : theme.type) + ' themes'
+                });
+            }
+            themeItems.push({
+                id: theme.id,
                 label: theme.label,
                 description: theme.description,
-                run: (mode: QuickOpenMode) => {
-                    if (mode === QuickOpenMode.OPEN) {
-                        resetTo = undefined;
-                    }
-                    previewTheme(theme.id);
-                    return true;
-                },
-                groupLabel,
-                showBorder: !!groupLabel && theme.type !== 'light'
-            }), { id: theme.id }));
+            });
         }
         const items = [...itemsByTheme.light, ...itemsByTheme.dark, ...itemsByTheme.hc];
-        this.quickOpenService.open({
-            onType: (_, accept) => accept(items)
-        }, {
-            placeholder: 'Select Color Theme (Up/Down Keys to Preview)',
-            fuzzyMatchLabel: true,
-            selectIndex: () => {
-                const current = this.themeService.getCurrentTheme().id;
-                return items.findIndex(item => item.id === current);
-            },
-            onClose: () => {
-                if (resetTo) {
-                    previewTheme.cancel();
-                    this.themeService.setCurrentTheme(resetTo);
+        this.quickInputService?.showQuickPick(items,
+            {
+                placeholder: nls.localizeByDefault('Select Color Theme (Up/Down Keys to Preview)'),
+                activeItem: items.find((item: QuickPickItem) => item.id === resetTo),
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                onDidChangeSelection: (quickPick: any, selectedItems: Array<QuickPickItem>) => {
+                    resetTo = undefined;
+                    previewTheme(selectedItems[0].id!);
+                },
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                onDidChangeActive: (quickPick: any, activeItems: Array<QuickPickItem>) => {
+                    previewTheme(activeItems[0].id!);
+                },
+                onDidHide: () => {
+                    if (resetTo) {
+                        this.themeService.setCurrentTheme(resetTo);
+                    }
                 }
-            }
-        });
+            });
     }
 
     registerColors(colors: ColorRegistry): void {
@@ -1177,6 +1202,8 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
             { id: 'list.hoverBackground', defaults: { dark: '#2A2D2E', light: '#F0F0F0' }, description: 'List/Tree background when hovering over items using the mouse.' },
             { id: 'list.hoverForeground', description: 'List/Tree foreground when hovering over items using the mouse.' },
             { id: 'list.filterMatchBackground', defaults: { dark: 'editor.findMatchHighlightBackground', light: 'editor.findMatchHighlightBackground' }, description: 'Background color of the filtered match.' },
+            { id: 'list.highlightForeground', defaults: { dark: '#18A3FF', light: '#0066BF', hc: 'focusBorder' }, description: 'List/Tree foreground color of the match highlights when searching inside the list/tree.' },
+            { id: 'list.focusHighlightForeground', defaults: { dark: 'list.highlightForeground', light: 'list.activeSelectionForeground', hc: 'list.highlightForeground' }, description: 'List/Tree foreground color of the match highlights on actively focused items when searching inside the list/tree.' },
             { id: 'tree.inactiveIndentGuidesStroke', defaults: { dark: Color.transparent('tree.indentGuidesStroke', 0.4), light: Color.transparent('tree.indentGuidesStroke', 0.4), hc: Color.transparent('tree.indentGuidesStroke', 0.4) }, description: 'Tree stroke color for the inactive indentation guides.' },
 
             // Editor Group & Tabs colors should be aligned with https://code.visualstudio.com/api/references/theme-color#editor-groups-tabs
@@ -1419,6 +1446,27 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
                     light: 'sideBar.foreground',
                     hc: 'sideBar.foreground'
                 }, description: 'Quick Input foreground color. The Quick Input widget is the container for views like the color theme picker.'
+            },
+            {
+                id: 'quickInput.list.focusBackground', defaults: {
+                    dark: undefined,
+                    light: undefined,
+                    hc: undefined
+                }, description: 'quickInput.list.focusBackground deprecation. Please use quickInputList.focusBackground instead'
+            },
+            {
+                id: 'quickInputList.focusForeground', defaults: {
+                    dark: 'list.activeSelectionForeground',
+                    light: 'list.activeSelectionForeground',
+                    hc: 'list.activeSelectionForeground'
+                }, description: 'Quick picker foreground color for the focused item'
+            },
+            {
+                id: 'quickInputList.focusBackground', defaults: {
+                    dark: 'list.activeSelectionBackground',
+                    light: 'list.activeSelectionBackground',
+                    hc: undefined
+                }, description: 'Quick picker background color for the focused item.'
             },
 
             // Panel colors should be aligned with https://code.visualstudio.com/api/references/theme-color#panel-colors
@@ -1873,6 +1921,51 @@ export class CommonFrontendContribution implements FrontendApplicationContributi
                     light: '#c5c5c5',
                     hc: '#c5c5c5'
                 }, description: 'Editor gutter decoration color for commenting ranges.'
+            },
+            {
+                id: 'breadcrumb.foreground',
+                defaults: {
+                    dark: Color.transparent('foreground', 0.8),
+                    light: Color.transparent('foreground', 0.8),
+                    hc: Color.transparent('foreground', 0.8),
+                },
+                description: 'Color of breadcrumb item text'
+            },
+            {
+                id: 'breadcrumb.background',
+                defaults: {
+                    dark: 'editor.background',
+                    light: 'editor.background',
+                    hc: 'editor.background',
+                },
+                description: 'Color of breadcrumb item background'
+            },
+            {
+                id: 'breadcrumb.focusForeground',
+                defaults: {
+                    dark: Color.lighten('foreground', 0.1),
+                    light: Color.darken('foreground', 0.2),
+                    hc: Color.lighten('foreground', 0.1),
+                },
+                description: 'Color of breadcrumb item text when focused'
+            },
+            {
+                id: 'breadcrumb.activeSelectionForeground',
+                defaults: {
+                    dark: Color.lighten('foreground', 0.1),
+                    light: Color.darken('foreground', 0.2),
+                    hc: Color.lighten('foreground', 0.1),
+                },
+                description: 'Color of selected breadcrumb item'
+            },
+            {
+                id: 'breadcrumbPicker.background',
+                defaults: {
+                    dark: 'editorWidget.background',
+                    light: 'editorWidget.background',
+                    hc: 'editorWidget.background',
+                },
+                description: 'Background color of breadcrumb item picker'
             }
         );
     }

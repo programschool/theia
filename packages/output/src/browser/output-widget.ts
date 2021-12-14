@@ -23,15 +23,17 @@ import { MonacoEditor } from '@theia/monaco/lib/browser/monaco-editor';
 import { SelectionService } from '@theia/core/lib/common/selection-service';
 import { MonacoEditorProvider } from '@theia/monaco/lib/browser/monaco-editor-provider';
 import { Disposable, DisposableCollection } from '@theia/core/lib/common/disposable';
-import { Message, BaseWidget, DockPanel, Widget, MessageLoop, StatefulWidget } from '@theia/core/lib/browser';
+import { Message, BaseWidget, DockPanel, Widget, MessageLoop, StatefulWidget, codicon } from '@theia/core/lib/browser';
 import { OutputUri } from '../common/output-uri';
-import { OutputChannelManager, OutputChannel } from '../common/output-channel';
+import { OutputChannelManager, OutputChannel } from './output-channel';
 import { Emitter, Event, deepClone } from '@theia/core';
+import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
 export class OutputWidget extends BaseWidget implements StatefulWidget {
 
     static readonly ID = 'outputView';
+    static readonly LABEL = nls.localizeByDefault('Output');
 
     @inject(SelectionService)
     protected readonly selectionService: SelectionService;
@@ -50,9 +52,9 @@ export class OutputWidget extends BaseWidget implements StatefulWidget {
     constructor() {
         super();
         this.id = OutputWidget.ID;
-        this.title.label = 'Output';
-        this.title.caption = 'Output';
-        this.title.iconClass = 'fa fa-flag';
+        this.title.label = OutputWidget.LABEL;
+        this.title.caption = OutputWidget.LABEL;
+        this.title.iconClass = codicon('output');
         this.title.closable = true;
         this.addClass('theia-output');
         this.node.tabIndex = 0;

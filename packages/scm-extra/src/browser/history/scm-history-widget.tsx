@@ -16,7 +16,7 @@
 
 import { injectable, inject, postConstruct } from '@theia/core/shared/inversify';
 import { Event as TheiaEvent, DisposableCollection } from '@theia/core';
-import { OpenerService, open, StatefulWidget, SELECTED_CLASS, WidgetManager, ApplicationShell } from '@theia/core/lib/browser';
+import { OpenerService, open, StatefulWidget, SELECTED_CLASS, WidgetManager, ApplicationShell, codicon } from '@theia/core/lib/browser';
 import { CancellationTokenSource } from '@theia/core/lib/common/cancellation';
 import { Message } from '@theia/core/shared/@phosphor/messaging';
 import { AutoSizer, List, ListRowRenderer, ListRowProps, InfiniteLoader, IndexRange, ScrollParams, CellMeasurerCache, CellMeasurer } from '@theia/core/shared/react-virtualized';
@@ -24,14 +24,13 @@ import URI from '@theia/core/lib/common/uri';
 import { ScmService } from '@theia/scm/lib/browser/scm-service';
 import { ScmHistoryProvider } from '.';
 import { SCM_HISTORY_ID, SCM_HISTORY_MAX_COUNT, SCM_HISTORY_LABEL } from './scm-history-contribution';
-import { ScmHistoryCommit, ScmFileChange } from '../scm-file-change-node';
+import { ScmHistoryCommit, ScmFileChange, ScmFileChangeNode } from '../scm-file-change-node';
 import { ScmAvatarService } from '@theia/scm/lib/browser/scm-avatar-service';
-import { ScmItemComponent } from '../scm-navigable-list-widget';
-import { ScmFileChangeNode } from '../scm-file-change-node';
-import { ScmNavigableListWidget } from '../scm-navigable-list-widget';
+import { ScmItemComponent, ScmNavigableListWidget } from '../scm-navigable-list-widget';
 import * as React from '@theia/core/shared/react';
 import { AlertMessage } from '@theia/core/lib/browser/widgets/alert-message';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { nls } from '@theia/core/lib/common/nls';
 
 export const ScmHistorySupport = Symbol('scm-history-support');
 export interface ScmHistorySupport {
@@ -101,7 +100,7 @@ export class ScmHistoryWidget extends ScmNavigableListWidget<ScmHistoryListNode>
         this.scrollContainer = 'scm-history-list-container';
         this.title.label = SCM_HISTORY_LABEL;
         this.title.caption = SCM_HISTORY_LABEL;
-        this.title.iconClass = 'fa scm-history-tab-icon';
+        this.title.iconClass = codicon('history');
         this.title.closable = true;
         this.addClass('theia-scm');
         this.addClass('theia-scm-history');
@@ -263,7 +262,10 @@ export class ScmHistoryWidget extends ScmNavigableListWidget<ScmHistoryListNode>
                 this.status = { state: 'error', errorMessage: <React.Fragment>History is not supported for {repository.provider.label} source control.</React.Fragment> };
             }
         } else {
-            this.status = { state: 'error', errorMessage: <React.Fragment>There is no repository selected in this workspace.</React.Fragment> };
+            this.status = {
+                state: 'error',
+                errorMessage: <React.Fragment>{nls.localizeByDefault('There is no repository selected in this workspace.')}</React.Fragment>
+            };
         }
     }
 
@@ -346,7 +348,7 @@ export class ScmHistoryWidget extends ScmNavigableListWidget<ScmHistoryListNode>
 
             case 'loading':
                 content = <div className='spinnerContainer'>
-                    <span className='fa fa-spinner fa-pulse fa-3x fa-fw'></span>
+                    <span className={`${codicon('loading')} theia-animation-spin large-spinner`}></span>
                 </div>;
                 break;
         }
@@ -418,9 +420,9 @@ export class ScmHistoryWidget extends ScmNavigableListWidget<ScmHistoryListNode>
 
     protected readonly renderCommit = (commit: ScmCommitNode) => this.doRenderCommit(commit);
     protected doRenderCommit(commit: ScmCommitNode): React.ReactNode {
-        let expansionToggleIcon = 'caret-right';
+        let expansionToggleIcon = codicon('chevron-right');
         if (commit && commit.expanded) {
-            expansionToggleIcon = 'caret-down';
+            expansionToggleIcon = codicon('chevron-down');
         }
         return <div
             className={`containerHead${commit.selected ? ' ' + SELECTED_CLASS : ''}`}
@@ -454,16 +456,13 @@ export class ScmHistoryWidget extends ScmNavigableListWidget<ScmHistoryListNode>
                         {commit.commitDetails.authorDateRelative + ' by ' + commit.commitDetails.authorName}
                     </div>
                 </div>
-                <div className='fa fa-eye detailButton' onClick={() => this.openDetailWidget(commit)}></div>
-                {
-                    !this.singleFileMode ? <div className='expansionToggle noselect'>
-                        <div className='toggle'>
-                            <div className='number'>{commit.commitDetails.fileChanges.length.toString()}</div>
-                            <div className={'icon fa fa-' + expansionToggleIcon}></div>
-                        </div>
+                <div className={`${codicon('eye')} detailButton`} onClick={() => this.openDetailWidget(commit)}></div>
+                {!this.singleFileMode && <div className='expansionToggle noselect'>
+                    <div className='toggle'>
+                        <div className='number'>{commit.commitDetails.fileChanges.length.toString()}</div>
+                        <div className={'icon ' + expansionToggleIcon}></div>
                     </div>
-                        : ''
-                }
+                </div>}
             </div>
         </div >;
     }
@@ -645,7 +644,7 @@ export class ScmHistoryList extends React.Component<ScmHistoryList.Props> {
             }
         } else {
             return <div key={key} style={style} className={`commitListElement${index === 0 ? ' first' : ''}`} >
-                <span className='fa fa-spinner fa-pulse fa-fw'></span>
+                <span className={`${codicon('loading')} theia-animation-spin`}></span>
             </div>;
         }
     };

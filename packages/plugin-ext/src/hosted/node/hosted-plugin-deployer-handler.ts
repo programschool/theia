@@ -17,9 +17,11 @@
 import * as fs from '@theia/core/shared/fs-extra';
 import { injectable, inject } from '@theia/core/shared/inversify';
 import { ILogger } from '@theia/core';
-import { PluginDeployerHandler, PluginDeployerEntry, PluginEntryPoint, DeployedPlugin, PluginDependencies } from '../../common/plugin-protocol';
+import { PluginDeployerHandler, PluginDeployerEntry, PluginEntryPoint, DeployedPlugin, PluginDependencies, PluginType } from '../../common/plugin-protocol';
 import { HostedPluginReader } from './plugin-reader';
 import { Deferred } from '@theia/core/lib/common/promise-util';
+import { HostedPluginLocalizationService } from './hosted-plugin-localization-service';
+import { BackendApplicationConfigProvider } from '@theia/core/lib/node/backend-application-config-provider';
 
 @injectable()
 export class HostedPluginDeployerHandler implements PluginDeployerHandler {
@@ -29,6 +31,9 @@ export class HostedPluginDeployerHandler implements PluginDeployerHandler {
 
     @inject(HostedPluginReader)
     private readonly reader: HostedPluginReader;
+
+    @inject(HostedPluginLocalizationService)
+    private readonly localizationService: HostedPluginLocalizationService;
 
     private readonly deployedLocations = new Map<string, Set<string>>();
 
@@ -80,7 +85,11 @@ export class HostedPluginDeployerHandler implements PluginDeployerHandler {
             }
             const metadata = this.reader.readMetadata(manifest);
             const dependencies: PluginDependencies = { metadata };
-            dependencies.mapping = this.reader.readDependencies(manifest);
+            // Do not resolve system (aka builtin) plugins because it should be done statically at build time.
+            const { resolveSystemPlugins = true } = BackendApplicationConfigProvider.get();
+            if (resolveSystemPlugins || entry.type !== PluginType.System) {
+                dependencies.mapping = this.reader.readDependencies(manifest);
+            }
             return dependencies;
         } catch (e) {
             console.error(`Failed to load plugin dependencies from '${pluginPath}' path`, e);
@@ -100,6 +109,8 @@ export class HostedPluginDeployerHandler implements PluginDeployerHandler {
         for (const plugin of backendPlugins) {
             await this.deployPlugin(plugin, 'backend');
         }
+        // rebuild translation config after deployment
+        this.localizationService.buildTranslationConfig([...this.deployedBackendPlugins.values()]);
         // resolve on first deploy
         this.backendPluginsMetadataDeferred.resolve(undefined);
     }
@@ -129,6 +140,7 @@ export class HostedPluginDeployerHandler implements PluginDeployerHandler {
             const { type } = entry;
             const deployed: DeployedPlugin = { metadata, type };
             deployed.contributes = this.reader.readContribution(manifest);
+            this.localizationService.deployLocalizations(deployed);
             deployedPlugins.set(metadata.model.id, deployed);
             this.logger.info(`Deploying ${entryPoint} plugin "${metadata.model.name}@${metadata.model.version}" from "${metadata.model.entryPoint[entryPoint] || pluginPath}"`);
         } catch (e) {
@@ -153,5 +165,4 @@ export class HostedPluginDeployerHandler implements PluginDeployerHandler {
         }
         return true;
     }
-
 }

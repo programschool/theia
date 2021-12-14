@@ -23,7 +23,7 @@ import { IJSONSchema, IJSONSchemaSnippet } from '@theia/core/lib/common/json-sch
 import { RecursivePartial } from '@theia/core/lib/common/types';
 import { PreferenceSchema, PreferenceSchemaProperties } from '@theia/core/lib/common/preferences/preference-schema';
 import { ProblemMatcherContribution, ProblemPatternContribution, TaskDefinition } from '@theia/task/lib/common';
-import { ColorDefinition } from '@theia/core/lib/browser/color-registry';
+import { ColorDefinition } from '@theia/core/lib/common/color';
 import { ResourceLabelFormatter } from '@theia/core/lib/common/label-protocol';
 
 export const hostedServicePath = '/services/hostedPlugin';
@@ -89,6 +89,20 @@ export interface PluginPackageContribution {
     problemPatterns?: PluginProblemPatternContribution[];
     jsonValidation?: PluginJsonValidationContribution[];
     resourceLabelFormatters?: ResourceLabelFormatter[];
+    localizations?: PluginPackageLocalization[];
+}
+
+export interface PluginPackageLocalization {
+    languageId: string;
+    languageName?: string;
+    localizedLanguageName?: string;
+    translations: PluginPackageTranslation[];
+    minimalTranslations?: { [key: string]: string };
+}
+
+export interface PluginPackageTranslation {
+    id: string;
+    path: string;
 }
 
 export interface PluginPackageCustomEditor {
@@ -129,6 +143,7 @@ export interface PluginPackageViewWelcome {
 export interface PluginPackageCommand {
     command: string;
     title: string;
+    original?: string;
     category?: string;
     icon?: string | { light: string; dark: string; };
     enablement?: string;
@@ -154,6 +169,8 @@ export interface PluginPackageKeybinding {
     mac?: string;
     linux?: string;
     win?: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    args?: any;
 }
 
 export interface PluginPackageGrammarsContribution {
@@ -511,7 +528,7 @@ export interface PluginContribution {
     viewsContainers?: { [location: string]: ViewContainer[] };
     views?: { [location: string]: View[] };
     viewsWelcome?: ViewWelcome[];
-    commands?: PluginCommand[]
+    commands?: PluginCommand[];
     menus?: { [location: string]: Menu[] };
     submenus?: Submenu[];
     keybindings?: Keybinding[];
@@ -524,6 +541,22 @@ export interface PluginContribution {
     problemMatchers?: ProblemMatcherContribution[];
     problemPatterns?: ProblemPatternContribution[];
     resourceLabelFormatters?: ResourceLabelFormatter[];
+    localizations?: Localization[];
+}
+
+export interface Localization {
+    languageId: string;
+    languageName?: string;
+    localizedLanguageName?: string;
+    translations: Translation[];
+    minimalTranslations?: { [key: string]: string };
+}
+
+export interface Translation {
+    id: string;
+    path: string;
+    version: string;
+    contents: { [scope: string]: { [key: string]: string } }
 }
 
 export interface SnippetContribution {
@@ -648,6 +681,7 @@ export interface ViewContainer {
     id: string;
     title: string;
     iconUrl: string;
+    themeIcon?: string;
 }
 
 /**
@@ -672,6 +706,7 @@ export interface ViewWelcome {
 export interface PluginCommand {
     command: string;
     title: string;
+    originalTitle?: string;
     category?: string;
     iconUrl?: IconUrl;
     themeIcon?: string;
@@ -706,18 +741,8 @@ export interface Keybinding {
     mac?: string;
     linux?: string;
     win?: string;
-}
-
-/**
- * Keybinding contribution
- */
-export interface Keybinding {
-    keybinding?: string;
-    command: string;
-    when?: string;
-    mac?: string;
-    linux?: string;
-    win?: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    args?: any;
 }
 
 /**
@@ -780,7 +805,7 @@ export function buildFrontendModuleName(plugin: PluginPackage | PluginModel): st
 
 export const HostedPluginClient = Symbol('HostedPluginClient');
 export interface HostedPluginClient {
-    postMessage(message: string): Promise<void>;
+    postMessage(pluginHost: string, message: string): Promise<void>;
 
     log(logPart: LogPart): void;
 
@@ -824,9 +849,11 @@ export interface HostedPluginServer extends JsonRpcServer<HostedPluginClient> {
 
     getExtPluginAPI(): Promise<ExtPluginApi[]>;
 
-    onMessage(message: string): Promise<void>;
+    onMessage(targetHost: string, message: string): Promise<void>;
 
 }
+
+export const PLUGIN_HOST_BACKEND = 'main';
 
 export interface WorkspaceStorageKind {
     workspace?: string | undefined;
@@ -859,9 +886,9 @@ export interface PluginServer {
 export const ServerPluginRunner = Symbol('ServerPluginRunner');
 export interface ServerPluginRunner {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    acceptMessage(jsonMessage: any): boolean;
+    acceptMessage(pluginHostId: string, jsonMessage: string): boolean;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    onMessage(jsonMessage: any): void;
+    onMessage(pluginHostId: string, jsonMessage: string): void;
     setClient(client: HostedPluginClient): void;
     setDefault(defaultRunner: ServerPluginRunner): void;
     clientClosed(): void;

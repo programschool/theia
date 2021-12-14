@@ -14,26 +14,29 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { DefaultDebugSessionFactory, } from '@theia/debug/lib/browser/debug-session-contribution';
+import { DefaultDebugSessionFactory } from '@theia/debug/lib/browser/debug-session-contribution';
 import { TerminalService } from '@theia/terminal/lib/browser/base/terminal-service';
 import { EditorManager } from '@theia/editor/lib/browser/editor-manager';
 import { BreakpointManager } from '@theia/debug/lib/browser/breakpoint/breakpoint-manager';
 import { LabelProvider } from '@theia/core/lib/browser/label-provider';
 import { MessageClient } from '@theia/core/lib/common/message-service-protocol';
-import { OutputChannelManager } from '@theia/output/lib/common/output-channel';
+import { OutputChannelManager } from '@theia/output/lib/browser/output-channel';
 import { DebugPreferences } from '@theia/debug/lib/browser/debug-preferences';
 import { DebugSessionOptions } from '@theia/debug/lib/browser/debug-session-options';
 import { DebugSession } from '@theia/debug/lib/browser/debug-session';
 import { DebugSessionConnection } from '@theia/debug/lib/browser/debug-session-connection';
-import { IWebSocket } from '@theia/core/shared/vscode-ws-jsonrpc';
 import { TerminalWidgetOptions, TerminalWidget } from '@theia/terminal/lib/browser/base/terminal-widget';
 import { TerminalOptionsExt } from '../../../common/plugin-api-rpc';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { DebugContribution } from '@theia/debug/lib/browser/debug-contribution';
+import { ContributionProvider } from '@theia/core/lib/common/contribution-provider';
+import { Channel } from '@theia/debug/lib/common/debug-service';
 
 export class PluginDebugSession extends DebugSession {
     constructor(
         readonly id: string,
         readonly options: DebugSessionOptions,
+        readonly parentSession: DebugSession | undefined,
         protected readonly connection: DebugSessionConnection,
         protected readonly terminalServer: TerminalService,
         protected readonly editorManager: EditorManager,
@@ -41,8 +44,9 @@ export class PluginDebugSession extends DebugSession {
         protected readonly labelProvider: LabelProvider,
         protected readonly messages: MessageClient,
         protected readonly fileService: FileService,
-        protected readonly terminalOptionsExt: TerminalOptionsExt | undefined) {
-        super(id, options, connection, terminalServer, editorManager, breakpoints, labelProvider, messages, fileService);
+        protected readonly terminalOptionsExt: TerminalOptionsExt | undefined,
+        protected readonly debugContributionProvider: ContributionProvider<DebugContribution>) {
+        super(id, options, parentSession, connection, terminalServer, editorManager, breakpoints, labelProvider, messages, fileService, debugContributionProvider);
     }
 
     protected async doCreateTerminal(terminalWidgetOptions: TerminalWidgetOptions): Promise<TerminalWidget> {
@@ -53,7 +57,7 @@ export class PluginDebugSession extends DebugSession {
 
 /**
  * Session factory for a client debug session that communicates with debug adapter contributed as plugin.
- * The main difference is to use a connection factory that creates [IWebSocket](#IWebSocket) over Rpc channel.
+ * The main difference is to use a connection factory that creates [Channel](#Channel) over Rpc channel.
  */
 export class PluginDebugSessionFactory extends DefaultDebugSessionFactory {
     constructor(
@@ -64,14 +68,15 @@ export class PluginDebugSessionFactory extends DefaultDebugSessionFactory {
         protected readonly messages: MessageClient,
         protected readonly outputChannelManager: OutputChannelManager,
         protected readonly debugPreferences: DebugPreferences,
-        protected readonly connectionFactory: (sessionId: string) => Promise<IWebSocket>,
+        protected readonly connectionFactory: (sessionId: string) => Promise<Channel>,
         protected readonly fileService: FileService,
-        protected readonly terminalOptionsExt: TerminalOptionsExt | undefined
+        protected readonly terminalOptionsExt: TerminalOptionsExt | undefined,
+        protected readonly debugContributionProvider: ContributionProvider<DebugContribution>
     ) {
         super();
     }
 
-    get(sessionId: string, options: DebugSessionOptions): DebugSession {
+    get(sessionId: string, options: DebugSessionOptions, parentSession?: DebugSession): DebugSession {
         const connection = new DebugSessionConnection(
             sessionId,
             this.connectionFactory,
@@ -80,6 +85,7 @@ export class PluginDebugSessionFactory extends DefaultDebugSessionFactory {
         return new PluginDebugSession(
             sessionId,
             options,
+            parentSession,
             connection,
             this.terminalService,
             this.editorManager,
@@ -87,6 +93,8 @@ export class PluginDebugSessionFactory extends DefaultDebugSessionFactory {
             this.labelProvider,
             this.messages,
             this.fileService,
-            this.terminalOptionsExt);
+            this.terminalOptionsExt,
+            this.debugContributionProvider
+        );
     }
 }

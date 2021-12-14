@@ -25,6 +25,8 @@ import { ThemeService } from '../theming';
 import { ContributionProvider } from '../../common/contribution-provider';
 import { MaybePromise } from '../../common/types';
 import { ApplicationShell, applicationShellLayoutVersion, ApplicationShellLayoutVersion } from './application-shell';
+import { CommonCommands } from '../common-frontend-contribution';
+import { WindowService } from '../window/window-service';
 
 /**
  * A contract for widgets that want to store and restore their inner state, between sessions.
@@ -109,11 +111,11 @@ export interface ApplicationShellLayoutMigration {
     onWillInflateWidget?(desc: WidgetDescription, context: ApplicationShellLayoutMigrationContext): MaybePromise<WidgetDescription | undefined>;
 }
 
-export const RESET_LAYOUT: Command = {
+export const RESET_LAYOUT = Command.toLocalizedCommand({
     id: 'reset.layout',
-    category: 'View',
+    category: CommonCommands.VIEW_CATEGORY,
     label: 'Reset Workbench Layout'
-};
+}, 'theia/core/resetWorkbenchLayout', CommonCommands.VIEW_CATEGORY_KEY);
 
 @injectable()
 export class ShellLayoutRestorer implements CommandContribution {
@@ -123,6 +125,9 @@ export class ShellLayoutRestorer implements CommandContribution {
 
     @inject(ContributionProvider) @named(ApplicationShellLayoutMigration)
     protected readonly migrations: ContributionProvider<ApplicationShellLayoutMigration>;
+
+    @inject(WindowService)
+    protected readonly windowService: WindowService;
 
     constructor(
         @inject(WidgetManager) protected widgetManager: WidgetManager,
@@ -136,12 +141,14 @@ export class ShellLayoutRestorer implements CommandContribution {
     }
 
     protected async resetLayout(): Promise<void> {
-        this.logger.info('>>> Resetting layout...');
-        this.shouldStoreLayout = false;
-        this.storageService.setData(this.storageKey, undefined);
-        ThemeService.get().reset(); // Theme service cannot use DI, so the current theme ID is stored elsewhere. Hence the explicit reset.
-        this.logger.info('<<< The layout has been successfully reset.');
-        window.location.reload(true);
+        if (await this.windowService.isSafeToShutDown()) {
+            this.logger.info('>>> Resetting layout...');
+            this.shouldStoreLayout = false;
+            this.storageService.setData(this.storageKey, undefined);
+            ThemeService.get().reset(); // Theme service cannot use DI, so the current theme ID is stored elsewhere. Hence the explicit reset.
+            this.logger.info('<<< The layout has been successfully reset.');
+            this.windowService.reload();
+        }
     }
 
     storeLayout(app: FrontendApplication): void {

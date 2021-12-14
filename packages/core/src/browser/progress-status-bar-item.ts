@@ -16,8 +16,7 @@
 
 import { injectable, inject } from 'inversify';
 import { CancellationToken } from 'vscode-ws-jsonrpc';
-import { ProgressClient } from '../common';
-import { ProgressMessage, ProgressUpdate } from '../common';
+import { ProgressClient, ProgressMessage, ProgressUpdate } from '../common';
 import { StatusBar, StatusBarAlignment } from './status-bar';
 import { Deferred } from '../common/promise-util';
 import throttle = require('lodash.throttle');
@@ -73,7 +72,7 @@ export class ProgressStatusBarItem implements ProgressClient {
             this.statusBar.removeElement(this.id);
             return;
         }
-        const text = `$(refresh~spin) ${message}`;
+        const text = `$(codicon-sync~spin) ${message}`;
         this.statusBar.setElement(this.id, {
             text,
             alignment: StatusBarAlignment.LEFT,

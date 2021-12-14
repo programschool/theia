@@ -28,12 +28,12 @@
 /* eslint-disable @typescript-eslint/tslint/config */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import { URI, UriComponents } from '@theia/core/shared/vscode-uri';
+import { UriComponents } from '@theia/core/shared/vscode-uri';
+import { FileChangeType, FileSystemError, URI } from './types-impl';
 import { RPCProtocol } from '../common/rpc-protocol';
 import { PLUGIN_RPC_CONTEXT, FileSystemExt, FileSystemMain, IFileChangeDto } from '../common/plugin-api-rpc';
 import * as vscode from '@theia/plugin';
 import * as files from '@theia/filesystem/lib/common/files';
-import { FileChangeType, FileSystemError } from './types-impl';
 import * as typeConverter from './type-converters';
 import { LanguagesExtImpl } from './languages';
 import { Schemes as Schemas } from '../common/uri-components';

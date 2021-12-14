@@ -25,19 +25,27 @@
     const hostMessaging = new class HostMessaging {
         constructor() {
             this.handlers = new Map();
-            window.addEventListener('message', (e) => {
-                if (e.data && (e.data.command === 'onmessage' || e.data.command === 'do-update-state')) {
-                    // Came from inner iframe
-                    this.postMessage(e.data.command, e.data.data);
-                    return;
+            window.addEventListener('message', e => {
+                // Note: `window.parent === window` when there is no parent...
+                const sourceIsSelfOrParentFrame = e.source === window.parent;
+                let sourceIsChildFrame = false;
+                for (let i = 0; i < window.frames.length; i++) {
+                    const frame = window.frames[i];
+                    if (e.source === frame) {
+                        sourceIsChildFrame = true;
+                        break;
+                    }
                 }
-
-                const channel = e.data.channel;
-                const handler = this.handlers.get(channel);
-                if (handler) {
-                    handler(e, e.data.args);
-                } else {
-                    console.error('no handler for ', e);
+                if (sourceIsChildFrame && e.data && (e.data.command === 'onmessage' || e.data.command === 'do-update-state')) {
+                    this.postMessage(e.data.command, e.data.data);
+                } else if (sourceIsChildFrame || sourceIsSelfOrParentFrame) {
+                    const channel = e.data.channel;
+                    const handler = this.handlers.get(channel);
+                    if (handler) {
+                        handler(e, e.data.args);
+                    } else {
+                        console.error('no handler for ', e);
+                    }
                 }
             });
         }

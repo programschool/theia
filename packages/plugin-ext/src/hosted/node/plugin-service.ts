@@ -16,11 +16,11 @@
 import { injectable, inject, named, postConstruct } from '@theia/core/shared/inversify';
 import { HostedPluginServer, HostedPluginClient, PluginDeployer, GetDeployedPluginsParams, DeployedPlugin } from '../../common/plugin-protocol';
 import { HostedPluginSupport } from './hosted-plugin';
-import { ILogger, Disposable } from '@theia/core';
-import { ContributionProvider } from '@theia/core';
+import { ILogger, Disposable, ContributionProvider } from '@theia/core';
 import { ExtPluginApiProvider, ExtPluginApi } from '../../common/plugin-ext-api-contribution';
 import { HostedPluginDeployerHandler } from './hosted-plugin-deployer-handler';
 import { PluginDeployerImpl } from '../../main/node/plugin-deployer-impl';
+import { HostedPluginLocalizationService } from './hosted-plugin-localization-service';
 
 @injectable()
 export class HostedPluginServerImpl implements HostedPluginServer {
@@ -32,6 +32,9 @@ export class HostedPluginServerImpl implements HostedPluginServer {
 
     @inject(PluginDeployer)
     protected readonly pluginDeployer: PluginDeployerImpl;
+
+    @inject(HostedPluginLocalizationService)
+    protected readonly localizationService: HostedPluginLocalizationService;
 
     @inject(ContributionProvider)
     @named(Symbol.for(ExtPluginApiProvider))
@@ -85,7 +88,7 @@ export class HostedPluginServerImpl implements HostedPluginServer {
         if (!pluginIds.length) {
             return [];
         }
-        const plugins = [];
+        const plugins: DeployedPlugin[] = [];
         let extraDeployedPlugins: Map<string, DeployedPlugin> | undefined;
         for (const pluginId of pluginIds) {
             let plugin = this.deployerHandler.getDeployedPlugin(pluginId);
@@ -102,11 +105,11 @@ export class HostedPluginServerImpl implements HostedPluginServer {
                 plugins.push(plugin);
             }
         }
-        return plugins;
+        return Promise.all(plugins.map(plugin => this.localizationService.localizePlugin(plugin)));
     }
 
-    onMessage(message: string): Promise<void> {
-        this.hostedPlugin.onMessage(message);
+    onMessage(pluginHostId: string, message: string): Promise<void> {
+        this.hostedPlugin.onMessage(pluginHostId, message);
         return Promise.resolve();
     }
 

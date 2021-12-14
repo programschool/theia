@@ -14,29 +14,36 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { injectable, inject } from '@theia/core/shared/inversify';
-import { QuickOpenService, QuickOpenModel, QuickOpenItem, QuickOpenGroupItem, QuickOpenMode, LabelProvider } from '@theia/core/lib/browser';
+import { injectable, inject, optional } from '@theia/core/shared/inversify';
+import { QuickPickItem, LabelProvider, QuickInputService, QuickInputButton } from '@theia/core/lib/browser';
 import { EnvVariablesServer } from '@theia/core/lib/common/env-variables';
 import { WorkspaceService } from './workspace-service';
 import { WorkspacePreferences } from './workspace-preferences';
 import URI from '@theia/core/lib/common/uri';
-import * as moment from 'moment';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
 import { FileStat } from '@theia/filesystem/lib/common/files';
-import { Path } from '@theia/core/lib/common';
+import { nls, Path } from '@theia/core/lib/common';
+
+interface RecentlyOpenedPick extends QuickPickItem {
+    resource?: URI
+}
 
 @injectable()
-export class QuickOpenWorkspace implements QuickOpenModel {
-
-    protected items: QuickOpenGroupItem[];
+export class QuickOpenWorkspace {
+    protected items: Array<RecentlyOpenedPick>;
     protected opened: boolean;
 
-    @inject(QuickOpenService) protected readonly quickOpenService: QuickOpenService;
+    @inject(QuickInputService) @optional() protected readonly quickInputService: QuickInputService;
     @inject(WorkspaceService) protected readonly workspaceService: WorkspaceService;
     @inject(FileService) protected readonly fileService: FileService;
     @inject(LabelProvider) protected readonly labelProvider: LabelProvider;
     @inject(WorkspacePreferences) protected preferences: WorkspacePreferences;
     @inject(EnvVariablesServer) protected readonly envServer: EnvVariablesServer;
+
+    protected readonly removeRecentWorkspaceButton: QuickInputButton = {
+        iconClass: 'codicon-remove-close',
+        tooltip: nls.localizeByDefault('Remove from Recently Opened')
+    };
 
     async open(workspaces: string[]): Promise<void> {
         this.items = [];
@@ -46,12 +53,10 @@ export class QuickOpenWorkspace implements QuickOpenModel {
         ]);
         const home = new URI(homeDirUri).path.toString();
         await this.preferences.ready;
-        if (!workspaces.length) {
-            this.items.push(new QuickOpenGroupItem({
-                label: 'No Recent Workspaces',
-                run: (mode: QuickOpenMode): boolean => false
-            }));
-        }
+        this.items.push({
+            type: 'separator',
+            label: nls.localizeByDefault('folders & workspaces')
+        });
         for (const workspace of workspaces) {
             const uri = new URI(workspace);
             let stat: FileStat | undefined;
@@ -66,35 +71,35 @@ export class QuickOpenWorkspace implements QuickOpenModel {
                 continue; // skip the temporary workspace files
             }
             const icon = this.labelProvider.getIcon(stat);
-            const iconClass = icon === '' ? undefined : icon + ' file-icon';
-            this.items.push(new QuickOpenGroupItem({
+            const iconClasses = icon === '' ? undefined : [icon + ' file-icon'];
+
+            this.items.push({
                 label: uri.path.base,
                 description: Path.tildify(uri.path.toString(), home),
-                groupLabel: `last modified ${moment(stat.mtime).fromNow()}`,
-                iconClass,
-                run: (mode: QuickOpenMode): boolean => {
-                    if (mode !== QuickOpenMode.OPEN) {
-                        return false;
-                    }
+                iconClasses,
+                buttons: [this.removeRecentWorkspaceButton],
+                resource: uri,
+                execute: () => {
                     const current = this.workspaceService.workspace;
                     const uriToOpen = new URI(workspace);
                     if ((current && current.resource.toString() !== workspace) || !current) {
                         this.workspaceService.open(uriToOpen);
                     }
-                    return true;
                 },
-            }));
+            });
         }
-
-        this.quickOpenService.open(this, {
-            placeholder: 'Type the name of the workspace you want to open',
-            fuzzyMatchLabel: true,
-            fuzzySort: false
+        this.quickInputService?.showQuickPick(this.items, {
+            placeholder: nls.localize(
+                'theia/workspace/openRecentPlaceholder',
+                'Type the name of the workspace you want to open'),
+            onDidTriggerItemButton: async context => {
+                const resource = context.item.resource;
+                if (resource) {
+                    await this.workspaceService.removeRecentWorkspace(resource.toString());
+                    context.removeItem();
+                }
+            }
         });
-    }
-
-    onType(lookFor: string, acceptor: (items: QuickOpenItem[]) => void): void {
-        acceptor(this.items);
     }
 
     select(): void {

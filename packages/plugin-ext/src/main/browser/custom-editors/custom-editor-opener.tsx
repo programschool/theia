@@ -15,12 +15,10 @@
  ********************************************************************************/
 
 import { inject } from '@theia/core/shared/inversify';
-import { PreviewEditorOpenerOptions } from '@theia/editor-preview/lib/browser';
 import URI from '@theia/core/lib/common/uri';
 import { ApplicationShell, OpenerOptions, OpenHandler, Widget, WidgetManager } from '@theia/core/lib/browser';
-import { CustomEditorPriority, CustomEditorSelector } from '../../../common';
+import { CustomEditor, CustomEditorPriority, CustomEditorSelector } from '../../../common';
 import * as glob from './glob';
-import { CustomEditor } from '../../../common';
 import { CustomEditorWidget } from './custom-editor-widget';
 import { v4 } from 'uuid';
 import { Emitter } from '@theia/core';
@@ -38,11 +36,15 @@ export class CustomEditorOpener implements OpenHandler {
         @inject(ApplicationShell) protected readonly shell: ApplicationShell,
         @inject(WidgetManager) protected readonly widgetManager: WidgetManager
     ) {
-        this.id = `custom-editor-${this.editor.viewType}`;
+        this.id = CustomEditorOpener.toCustomEditorId(this.editor.viewType);
         this.label = this.editor.displayName;
     }
 
-    canHandle(uri: URI, options?: PreviewEditorOpenerOptions): number {
+    static toCustomEditorId(editorViewType: string): string {
+        return `custom-editor-${editorViewType}`;
+    }
+
+    canHandle(uri: URI): number {
         if (this.matches(this.editor.selector, uri)) {
             return this.getPriority();
         }
@@ -53,11 +55,13 @@ export class CustomEditorOpener implements OpenHandler {
         switch (this.editor.priority) {
             case CustomEditorPriority.default: return 500;
             case CustomEditorPriority.builtin: return 400;
-            case CustomEditorPriority.option: return 300;
+            /** `option` should not open the custom-editor by default. */
+            case CustomEditorPriority.option: return 1;
             default: return 200;
         }
     }
 
+    protected readonly pendingWidgetPromises = new Map<string, Promise<CustomEditorWidget>>();
     async open(uri: URI, options?: OpenerOptions): Promise<Widget | undefined> {
         let widget: CustomEditorWidget | undefined;
         const widgets = this.widgetManager.getWidgets(CustomEditorWidget.FACTORY_ID) as CustomEditorWidget[];
@@ -70,13 +74,20 @@ export class CustomEditorOpener implements OpenHandler {
             return this.shell.activateWidget(widget.id);
         }
         if (!widget) {
-            const id = v4();
-            widget = await this.widgetManager.getOrCreateWidget<CustomEditorWidget>(CustomEditorWidget.FACTORY_ID, { id });
-            widget.viewType = this.editor.viewType;
-            widget.resource = uri;
+            const uriString = uri.toString();
+            let widgetPromise = this.pendingWidgetPromises.get(uriString);
+            if (!widgetPromise) {
+                const id = v4();
+                widgetPromise = this.widgetManager.getOrCreateWidget<CustomEditorWidget>(CustomEditorWidget.FACTORY_ID, { id });
+                this.pendingWidgetPromises.set(uriString, widgetPromise);
+                widget = await widgetPromise;
+                this.pendingWidgetPromises.delete(uriString);
+                widget.viewType = this.editor.viewType;
+                widget.resource = uri;
+                this.onDidOpenCustomEditorEmitter.fire(widget);
+            }
         }
-
-        this.onDidOpenCustomEditorEmitter.fire(widget);
+        return widget;
     }
 
     matches(selectors: CustomEditorSelector[], resource: URI): boolean {

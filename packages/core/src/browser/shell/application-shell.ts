@@ -16,26 +16,27 @@
 
 import { injectable, inject, optional, postConstruct } from 'inversify';
 import { ArrayExt, find, toArray, each } from '@phosphor/algorithm';
-import { Signal } from '@phosphor/signaling';
 import {
     BoxLayout, BoxPanel, DockLayout, DockPanel, FocusTracker, Layout, Panel, SplitLayout,
     SplitPanel, TabBar, Widget, Title
 } from '@phosphor/widgets';
 import { Message } from '@phosphor/messaging';
 import { IDragEvent } from '@phosphor/dragdrop';
-import { RecursivePartial, Event as CommonEvent, DisposableCollection, Disposable } from '../../common';
+import { RecursivePartial, Event as CommonEvent, DisposableCollection, Disposable, environment } from '../../common';
 import { animationFrame } from '../browser';
 import { Saveable, SaveableWidget, SaveOptions } from '../saveable';
 import { StatusBarImpl, StatusBarEntry, StatusBarAlignment } from '../status-bar/status-bar';
 import { TheiaDockPanel, BOTTOM_AREA_ID, MAIN_AREA_ID } from './theia-dock-panel';
 import { SidePanelHandler, SidePanel, SidePanelHandlerFactory } from './side-panel-handler';
-import { TabBarRendererFactory, TabBarRenderer, SHELL_TABBAR_CONTEXT_MENU, ScrollableTabBar, ToolbarAwareTabBar } from './tab-bars';
+import { TabBarRendererFactory, SHELL_TABBAR_CONTEXT_MENU, ScrollableTabBar, ToolbarAwareTabBar } from './tab-bars';
 import { SplitPositionHandler, SplitPositionOptions } from './split-panels';
 import { FrontendApplicationStateService } from '../frontend-application-state';
-import { TabBarToolbarRegistry, TabBarToolbarFactory, TabBarToolbar } from './tab-bar-toolbar';
+import { TabBarToolbarRegistry, TabBarToolbarFactory } from './tab-bar-toolbar';
 import { ContextKeyService } from '../context-key-service';
 import { Emitter } from '../../common/event';
 import { waitForRevealed, waitForClosed } from '../widgets';
+import { CorePreferences } from '../core-preferences';
+import { BreadcrumbsRendererFactory } from '../breadcrumbs/breadcrumbs-renderer';
 
 /** The class name added to ApplicationShell instances. */
 const APPLICATION_SHELL_CLASS = 'theia-ApplicationShell';
@@ -54,12 +55,16 @@ export type ApplicationShellLayoutVersion =
     /** view containers are introduced, backward compatible to 2.0 */
     3.0 |
     /** git history view is replaced by a more generic scm history view, backward compatible to 3.0 */
-    4.0;
+    4.0 |
+    /** Replace custom/font-awesome icons with codicons */
+    5.0 |
+    /** added the ability to drag and drop view parts between view containers */
+    6.0;
 
 /**
  * When a version is increased, make sure to introduce a migration (ApplicationShellLayoutMigration) to this version.
  */
-export const applicationShellLayoutVersion: ApplicationShellLayoutVersion = 4.0;
+export const applicationShellLayoutVersion: ApplicationShellLayoutVersion = 5.0;
 
 export const ApplicationShellOptions = Symbol('ApplicationShellOptions');
 export const DockPanelRendererFactory = Symbol('DockPanelRendererFactory');
@@ -76,21 +81,26 @@ export class DockPanelRenderer implements DockLayout.IRenderer {
     readonly tabBarClasses: string[] = [];
 
     constructor(
-        @inject(TabBarRendererFactory) protected readonly tabBarRendererFactory: () => TabBarRenderer,
+        @inject(TabBarRendererFactory) protected readonly tabBarRendererFactory: TabBarRendererFactory,
         @inject(TabBarToolbarRegistry) protected readonly tabBarToolbarRegistry: TabBarToolbarRegistry,
-        @inject(TabBarToolbarFactory) protected readonly tabBarToolbarFactory: () => TabBarToolbar
+        @inject(TabBarToolbarFactory) protected readonly tabBarToolbarFactory: TabBarToolbarFactory,
+        @inject(BreadcrumbsRendererFactory) protected readonly breadcrumbsRendererFactory: BreadcrumbsRendererFactory,
     ) { }
 
     createTabBar(): TabBar<Widget> {
         const renderer = this.tabBarRendererFactory();
-        const tabBar = new ToolbarAwareTabBar(this.tabBarToolbarRegistry, this.tabBarToolbarFactory, {
-            renderer,
-            // Scroll bar options
-            handlers: ['drag-thumb', 'keyboard', 'wheel', 'touch'],
-            useBothWheelAxes: true,
-            scrollXMarginOffset: 4,
-            suppressScrollY: true
-        });
+        const tabBar = new ToolbarAwareTabBar(
+            this.tabBarToolbarRegistry,
+            this.tabBarToolbarFactory,
+            this.breadcrumbsRendererFactory,
+            {
+                renderer,
+                // Scroll bar options
+                handlers: ['drag-thumb', 'keyboard', 'wheel', 'touch'],
+                useBothWheelAxes: true,
+                scrollXMarginOffset: 4,
+                suppressScrollY: true
+            });
         this.tabBarClasses.forEach(c => tabBar.addClass(c));
         renderer.tabBar = tabBar;
         tabBar.disposed.connect(() => renderer.dispose());
@@ -204,7 +214,8 @@ export class ApplicationShell extends Widget {
         @inject(SidePanelHandlerFactory) sidePanelHandlerFactory: () => SidePanelHandler,
         @inject(SplitPositionHandler) protected splitPositionHandler: SplitPositionHandler,
         @inject(FrontendApplicationStateService) protected readonly applicationStateService: FrontendApplicationStateService,
-        @inject(ApplicationShellOptions) @optional() options: RecursivePartial<ApplicationShell.Options> = {}
+        @inject(ApplicationShellOptions) @optional() options: RecursivePartial<ApplicationShell.Options> = {},
+        @inject(CorePreferences) protected readonly corePreferences: CorePreferences
     ) {
         super(options as Widget.IOptions);
         this.addClass(APPLICATION_SHELL_CLASS);
@@ -250,6 +261,17 @@ export class ApplicationShell extends Widget {
     protected init(): void {
         this.initSidebarVisibleKeyContext();
         this.initFocusKeyContexts();
+
+        if (!environment.electron.is()) {
+            this.corePreferences.ready.then(() => {
+                this.setTopPanelVisibility(this.corePreferences['window.menuBarVisibility']);
+            });
+            this.corePreferences.onPreferenceChanged(preference => {
+                if (preference.preferenceName === 'window.menuBarVisibility') {
+                    this.setTopPanelVisibility(preference.newValue);
+                }
+            });
+        }
     }
 
     protected initSidebarVisibleKeyContext(): void {
@@ -276,7 +298,12 @@ export class ApplicationShell extends Widget {
             panelFocus.set(area === 'main');
         };
         updateFocusContextKeys();
-        this.activeChanged.connect(updateFocusContextKeys);
+        this.onDidChangeActiveWidget(updateFocusContextKeys);
+    }
+
+    protected setTopPanelVisibility(preference: string): void {
+        const hiddenPreferences = ['compact', 'hidden'];
+        this.topPanel.setHidden(hiddenPreferences.includes(preference));
     }
 
     protected onBeforeAttach(msg: Message): void {
@@ -448,7 +475,7 @@ export class ApplicationShell extends Widget {
             mode: 'multiple-document',
             renderer,
             spacing: 0
-        });
+        }, this.corePreferences);
         dockPanel.id = MAIN_AREA_ID;
         dockPanel.widgetAdded.connect((_, widget) => this.fireDidAddWidget(widget));
         dockPanel.widgetRemoved.connect((_, widget) => this.fireDidRemoveWidget(widget));
@@ -466,7 +493,7 @@ export class ApplicationShell extends Widget {
             mode: 'multiple-document',
             renderer,
             spacing: 0
-        });
+        }, this.corePreferences);
         dockPanel.id = BOTTOM_AREA_ID;
         dockPanel.widgetAdded.connect((sender, widget) => {
             this.refreshBottomPanelToggleButton();
@@ -493,6 +520,7 @@ export class ApplicationShell extends Widget {
     protected createTopPanel(): Panel {
         const topPanel = new Panel();
         topPanel.id = 'theia-top-panel';
+        topPanel.hide();
         return topPanel;
     }
 
@@ -818,20 +846,15 @@ export class ApplicationShell extends Widget {
      */
     findTitle(tabBar: TabBar<Widget>, event?: Event): Title<Widget> | undefined {
         if (event?.target instanceof HTMLElement) {
-            let tabNode: HTMLElement | null = event.target;
-            while (tabNode && !tabNode.classList.contains('p-TabBar-tab')) {
-                tabNode = tabNode.parentElement;
+            const tabNode = event.target;
+
+            const titleIndex = Array.from(tabBar.contentNode.getElementsByClassName('p-TabBar-tab'))
+                .findIndex(node => node.contains(tabNode));
+
+            if (titleIndex !== -1) {
+                return tabBar.titles[titleIndex];
             }
-            if (tabNode && tabNode.title) {
-                let title = tabBar.titles.find(t => t.caption === tabNode!.title);
-                if (title) {
-                    return title;
-                }
-                title = tabBar.titles.find(t => t.label === tabNode!.title);
-                if (title) {
-                    return title;
-                }
-            }
+
         }
         return tabBar.currentTitle || undefined;
     }
@@ -848,6 +871,17 @@ export class ApplicationShell extends Widget {
             }
         }
         return this.currentTabBar;
+    }
+
+    /**
+     *  @returns the widget whose title has been targeted by a DOM event on a tabbar, or undefined if none can be found.
+     */
+    findTargetedWidget(event?: Event): Widget | undefined {
+        if (event) {
+            const tab = this.findTabBar(event);
+            const title = tab && this.findTitle(tab, event);
+            return title && title.owner;
+        }
     }
 
     /**
@@ -895,26 +929,11 @@ export class ApplicationShell extends Widget {
     }
 
     /**
-     * A signal emitted whenever the `currentWidget` property is changed.
-     *
-     * @deprecated since 0.11.0, use `onDidChangeCurrentWidget` instead
-     */
-    readonly currentChanged = new Signal<this, FocusTracker.IChangedArgs<Widget>>(this);
-
-    /**
      * Handle a change to the current widget.
      */
     private onCurrentChanged(sender: FocusTracker<Widget>, args: FocusTracker.IChangedArgs<Widget>): void {
-        this.currentChanged.emit(args);
         this.onDidChangeCurrentWidgetEmitter.fire(args);
     }
-
-    /**
-     * A signal emitted whenever the `activeWidget` property is changed.
-     *
-     * @deprecated since 0.11.0, use `onDidChangeActiveWidget` instead
-     */
-    readonly activeChanged = new Signal<this, FocusTracker.IChangedArgs<Widget>>(this);
 
     protected readonly toDisposeOnActiveChanged = new DisposableCollection();
 
@@ -979,7 +998,6 @@ export class ApplicationShell extends Widget {
             };
             this.toDisposeOnActiveChanged.push(Disposable.create(() => newValue['onCloseRequest'] = onCloseRequest));
         }
-        this.activeChanged.emit(args);
         this.onDidChangeActiveWidgetEmitter.fire(args);
     }
 
@@ -1334,7 +1352,7 @@ export class ApplicationShell extends Widget {
             this.statusBar.removeElement(BOTTOM_PANEL_TOGGLE_ID);
         } else {
             const element: StatusBarEntry = {
-                text: '$(window-maximize)',
+                text: '$(codicon-window)',
                 alignment: StatusBarAlignment.RIGHT,
                 tooltip: 'Toggle Bottom Panel',
                 command: 'core.toggle.bottom.panel',
@@ -1384,6 +1402,29 @@ export class ApplicationShell extends Widget {
             for (let i = 0; i < titles.length; i++) {
                 if (filter === undefined || filter(titles[i], i)) {
                     titles[i].owner.close();
+                }
+            }
+        }
+    }
+
+    saveTabs(tabBarOrArea: TabBar<Widget> | ApplicationShell.Area,
+        filter?: (title: Title<Widget>, index: number) => boolean): void {
+        if (tabBarOrArea === 'main') {
+            this.mainAreaTabBars.forEach(tb => this.saveTabs(tb, filter));
+        } else if (tabBarOrArea === 'bottom') {
+            this.bottomAreaTabBars.forEach(tb => this.saveTabs(tb, filter));
+        } else if (typeof tabBarOrArea === 'string') {
+            const tabBar = this.getTabBarFor(tabBarOrArea);
+            if (tabBar) {
+                this.saveTabs(tabBar, filter);
+            }
+        } else if (tabBarOrArea) {
+            const titles = toArray(tabBarOrArea.titles);
+            for (let i = 0; i < titles.length; i++) {
+                if (filter === undefined || filter(titles[i], i)) {
+                    const widget = titles[i].owner;
+                    const saveable = Saveable.get(widget);
+                    saveable?.save();
                 }
             }
         }
@@ -1746,7 +1787,11 @@ export class ApplicationShell extends Widget {
      * Save all dirty widgets.
      */
     async saveAll(options?: SaveOptions): Promise<void> {
-        await Promise.all(this.tracker.widgets.map(widget => Saveable.save(widget, options)));
+        await Promise.all(this.tracker.widgets.map(widget => {
+            if (Saveable.isDirty(widget)) {
+                Saveable.save(widget, options);
+            }
+        }));
     }
 
     /**
@@ -1765,18 +1810,18 @@ export class ApplicationShell extends Widget {
         return undefined;
     }
 
-    canToggleMaximized(): boolean {
-        const area = this.currentWidget && this.getAreaFor(this.currentWidget);
+    canToggleMaximized(widget: Widget | undefined = this.currentWidget): boolean {
+        const area = widget && this.getAreaFor(widget);
         return area === 'main' || area === 'bottom';
     }
 
-    toggleMaximized(): void {
-        const area = this.currentWidget && this.getAreaPanelFor(this.currentWidget);
+    toggleMaximized(widget: Widget | undefined = this.currentWidget): void {
+        const area = widget && this.getAreaPanelFor(widget);
         if (area instanceof TheiaDockPanel && (area === this.mainPanel || area === this.bottomPanel)) {
             area.toggleMaximized();
+            this.revealWidget(widget!.id);
         }
     }
-
 }
 
 /**
@@ -1794,6 +1839,12 @@ export namespace ApplicationShell {
      */
     export function isSideArea(area?: string): area is 'left' | 'right' | 'bottom' {
         return area === 'left' || area === 'right' || area === 'bottom';
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    export function isValidArea(area?: any): area is ApplicationShell.Area {
+        const areas = ['main', 'top', 'left', 'right', 'bottom'];
+        return (area !== undefined && typeof area === 'string' && areas.includes(area));
     }
 
     /**

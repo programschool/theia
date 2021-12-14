@@ -20,8 +20,6 @@ import * as theia from '@theia/plugin';
 import { BackendInitializationFn, PluginAPIFactory, Plugin, emptyPlugin } from '@theia/plugin-ext';
 import { VSCODE_DEFAULT_API_VERSION } from '../common/plugin-vscode-types';
 
-/** Set up en as a default locale for VS Code extensions using vscode-nls */
-process.env['VSCODE_NLS_CONFIG'] = JSON.stringify({ locale: 'en', availableLanguages: {} });
 process.env['VSCODE_PID'] = process.env['THEIA_PARENT_PID'];
 
 const pluginsApiImpl = new Map<string, typeof theia>();
@@ -36,6 +34,17 @@ export enum ExtensionKind {
 }
 
 export const doInitialization: BackendInitializationFn = (apiFactory: PluginAPIFactory, plugin: Plugin) => {
+    pluginsApiImpl.set(plugin.model.id, createVSCodeAPI(apiFactory, plugin));
+    plugins.push(plugin);
+    pluginApiFactory = apiFactory;
+
+    if (!isLoadOverride) {
+        overrideInternalLoad();
+        isLoadOverride = true;
+    }
+};
+
+function createVSCodeAPI(apiFactory: PluginAPIFactory, plugin: Plugin): typeof theia {
     const vscode = Object.assign(apiFactory(plugin), { ExtensionKind });
 
     // use Theia plugin api instead vscode extensions
@@ -53,16 +62,8 @@ export const doInitialization: BackendInitializationFn = (apiFactory: PluginAPIF
 
     // override the version for vscode to be a VSCode version
     (<any>vscode).version = process.env['VSCODE_API_VERSION'] || VSCODE_DEFAULT_API_VERSION;
-
-    pluginsApiImpl.set(plugin.model.id, vscode);
-    plugins.push(plugin);
-    pluginApiFactory = apiFactory;
-
-    if (!isLoadOverride) {
-        overrideInternalLoad();
-        isLoadOverride = true;
-    }
-};
+    return vscode;
+}
 
 function overrideInternalLoad(): void {
     const module = require('module');
@@ -85,7 +86,7 @@ function overrideInternalLoad(): void {
 
         if (!defaultApi) {
             console.warn(`Could not identify plugin for 'Theia' require call from ${parent.filename}`);
-            defaultApi = pluginApiFactory(emptyPlugin);
+            defaultApi = createVSCodeAPI(pluginApiFactory, emptyPlugin);
         }
 
         return defaultApi;
@@ -102,6 +103,10 @@ function asExtension(plugin: any | undefined): any | undefined {
     }
     if (plugin.pluginPath) {
         plugin.extensionPath = plugin.pluginPath;
+    }
+
+    if (plugin.pluginUri) {
+        plugin.extensionUri = plugin.pluginUri;
     }
     // stub as a local VS Code extension (not running on a remote workspace)
     plugin.extensionKind = ExtensionKind.UI;

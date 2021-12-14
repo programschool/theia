@@ -16,17 +16,18 @@
 
 import { Message } from '@theia/core/shared/@phosphor/messaging';
 import { Disposable, SelectionService } from '@theia/core';
-import { BaseWidget, MessageLoop, Widget } from '@theia/core/lib/browser/widgets/widget';
+import { BaseWidget, codicon, MessageLoop, Widget } from '@theia/core/lib/browser/widgets/widget';
 import { DisposableCollection } from '@theia/core/lib/common/disposable';
 import { inject, injectable, postConstruct } from '@theia/core/shared/inversify';
 import { PropertyViewContentWidget } from './property-view-content-widget';
 import { PropertyViewService } from './property-view-service';
+import { nls } from '@theia/core/lib/common/nls';
 
 @injectable()
 export class PropertyViewWidget extends BaseWidget {
 
     static readonly ID = 'property-view';
-    static readonly LABEL = 'Properties';
+    static readonly LABEL = nls.localize('theia/property-view/properties', 'Properties');
 
     protected contentWidget: PropertyViewContentWidget;
 
@@ -40,7 +41,7 @@ export class PropertyViewWidget extends BaseWidget {
         this.id = PropertyViewWidget.ID;
         this.title.label = PropertyViewWidget.LABEL;
         this.title.caption = PropertyViewWidget.LABEL;
-        this.title.iconClass = 'fa fa-table';
+        this.title.iconClass = codicon('table');
         this.title.closable = true;
 
         this.addClass('theia-property-view-widget');

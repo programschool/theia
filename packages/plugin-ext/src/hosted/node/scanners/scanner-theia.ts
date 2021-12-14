@@ -52,7 +52,11 @@ import {
     ViewWelcome,
     PluginPackageCustomEditor,
     CustomEditor,
-    CustomEditorPriority
+    CustomEditorPriority,
+    PluginPackageLocalization,
+    Localization,
+    PluginPackageTranslation,
+    Translation
 } from '../../../common/plugin-protocol';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -69,7 +73,7 @@ import {
     ProblemPatternContribution,
     TaskDefinition
 } from '@theia/task/lib/common/task-protocol';
-import { ColorDefinition } from '@theia/core/lib/browser/color-registry';
+import { ColorDefinition } from '@theia/core/lib/common/color';
 import { ResourceLabelFormatter } from '@theia/core/lib/common/label-protocol';
 import { PluginUriFactory } from './plugin-uri-factory';
 
@@ -131,7 +135,7 @@ export class TheiaPluginScanner implements PluginScanner {
             stopMethod: 'stop',
             frontendModuleName: buildFrontendModuleName(plugin),
 
-            backendInitPath: __dirname + '/backend-init-theia.js'
+            backendInitPath: path.join(__dirname, 'backend-init-theia')
         };
     }
 
@@ -213,7 +217,7 @@ export class TheiaPluginScanner implements PluginScanner {
 
                 for (const location of Object.keys(viewsContainers)) {
                     const containers = this.readViewsContainers(viewsContainers[location], rawPlugin);
-                    const loc = location === 'activitybar' ? 'left' : location;
+                    const loc = location === 'activitybar' ? 'left' : location === 'panel' ? 'bottom' : location;
                     if (contributions.viewsContainers[loc]) {
                         contributions.viewsContainers[loc] = contributions.viewsContainers[loc].concat(containers);
                     } else {
@@ -343,10 +347,45 @@ export class TheiaPluginScanner implements PluginScanner {
         } catch (err) {
             console.error(`Could not read '${rawPlugin.name}' contribution 'colors'.`, rawPlugin.contributes.colors, err);
         }
+
+        try {
+            contributions.localizations = this.readLocalizations(rawPlugin);
+        } catch (err) {
+            console.error(`Could not read '${rawPlugin.name}' contribution 'localizations'.`, rawPlugin.contributes.colors, err);
+        }
+
         return contributions;
     }
 
-    protected readCommand({ command, title, category, icon, enablement }: PluginPackageCommand, pck: PluginPackage): PluginCommand {
+    protected readLocalizations(pck: PluginPackage): Localization[] | undefined {
+        if (!pck.contributes || !pck.contributes.localizations) {
+            return undefined;
+        }
+        return pck.contributes.localizations.map(e => this.readLocalization(e, pck.packagePath));
+    }
+
+    protected readLocalization({ languageId, languageName, localizedLanguageName, translations }: PluginPackageLocalization, pluginPath: string): Localization {
+        const local: Localization = {
+            languageId,
+            languageName,
+            localizedLanguageName,
+            translations: []
+        };
+        local.translations = translations.map(e => this.readTranslation(e, pluginPath));
+        return local;
+    }
+
+    protected readTranslation(packageTranslation: PluginPackageTranslation, pluginPath: string): Translation {
+        const translation = this.readJson<Translation>(path.resolve(pluginPath, packageTranslation.path));
+        if (!translation) {
+            throw new Error(`Could not read json file '${packageTranslation.path}'.`);
+        }
+        translation.id = packageTranslation.id;
+        translation.path = packageTranslation.path;
+        return translation;
+    }
+
+    protected readCommand({ command, title, original, category, icon, enablement }: PluginPackageCommand, pck: PluginPackage): PluginCommand {
         let themeIcon: string | undefined;
         let iconUrl: IconUrl | undefined;
         if (icon) {
@@ -363,7 +402,7 @@ export class TheiaPluginScanner implements PluginScanner {
                 };
             }
         }
-        return { command, title, category, iconUrl, themeIcon, enablement };
+        return { command, title, originalTitle: original, category, iconUrl, themeIcon, enablement };
     }
 
     protected toPluginUrl(pck: PluginPackage, relativePath: string): string {
@@ -492,7 +531,8 @@ export class TheiaPluginScanner implements PluginScanner {
             when: rawKeybinding.when,
             mac: rawKeybinding.mac,
             linux: rawKeybinding.linux,
-            win: rawKeybinding.win
+            win: rawKeybinding.win,
+            args: rawKeybinding.args
         };
     }
 
@@ -514,10 +554,13 @@ export class TheiaPluginScanner implements PluginScanner {
     }
 
     private readViewContainer(rawViewContainer: PluginPackageViewContainer, pck: PluginPackage): ViewContainer {
+        const themeIcon = rawViewContainer.icon.startsWith('$(') ? rawViewContainer.icon : undefined;
+        const iconUrl = this.toPluginUrl(pck, rawViewContainer.icon);
         return {
             id: rawViewContainer.id,
             title: rawViewContainer.title,
-            iconUrl: this.toPluginUrl(pck, rawViewContainer.icon)
+            iconUrl,
+            themeIcon,
         };
     }
 
@@ -659,7 +702,7 @@ export class TheiaPluginScanner implements PluginScanner {
             taskType: definitionContribution.type,
             source: pluginName,
             properties: {
-                required: definitionContribution.required,
+                required: definitionContribution.required || [],
                 all: propertyKeys,
                 schema: definitionContribution
             }

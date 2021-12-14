@@ -41,6 +41,7 @@
         "code": 180
       }
     ],
+    "no-duplicate-imports": "error",
     "no-magic-numbers": "off",
     "no-multiple-empty-lines": [
       "error",
@@ -130,18 +131,29 @@
         }
       }
     ],
+    "@theia/no-src-import": "error",
+    "@theia/runtime-import-check": "error",
     "@theia/shared-dependencies": "error",
-    "import/no-extraneous-dependencies": "error"
+    "import/no-extraneous-dependencies": "error",
+    "import/no-dynamic-require": "error"
   },
   "overrides": [
     {
       "files": [
-        "dev-packages",
-        "*.{spec,espec,slow-spec}.{js,ts}"
+        "**/*.{spec,espec,slow-spec}.{js,ts}"
       ],
       "rules": {
+        "@theia/runtime-import-check": "off",
         "@theia/shared-dependencies": "off",
         "import/no-extraneous-dependencies": "off"
+      }
+    },
+    {
+      "files": [
+        "**/electron-{node,main}/**"
+      ],
+      "rules": {
+        "import/no-dynamic-require": "off"
       }
     }
   ]

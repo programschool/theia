@@ -20,6 +20,8 @@ import { BackendApplicationContribution } from '../backend-application';
 import { MessagingContribution, MessagingContainer } from './messaging-contribution';
 import { ConnectionContainerModule } from './connection-container-module';
 import { MessagingService } from './messaging-service';
+import { MessagingListener, MessagingListenerContribution } from './messaging-listeners';
+import { DEFAULT_HTTP_WEBSOCKET_ADAPTER_TIMEOUT, HttpWebsocketAdapter, HttpWebsocketAdapterFactory, HttpWebsocketAdapterTimeout } from './http-websocket-adapter';
 
 export const messagingBackendModule = new ContainerModule(bind => {
     bindContributionProvider(bind, ConnectionContainerModule);
@@ -31,4 +33,9 @@ export const messagingBackendModule = new ContainerModule(bind => {
         return child.get(MessagingService.Identifier);
     }).inSingletonScope();
     bind(BackendApplicationContribution).toService(MessagingContribution);
+    bind(MessagingListener).toSelf().inSingletonScope();
+    bindContributionProvider(bind, MessagingListenerContribution);
+    bind(HttpWebsocketAdapter).toSelf();
+    bind(HttpWebsocketAdapterFactory).toFactory(({ container }) => () => container.get(HttpWebsocketAdapter));
+    bind(HttpWebsocketAdapterTimeout).toConstantValue(DEFAULT_HTTP_WEBSOCKET_ADAPTER_TIMEOUT);
 });

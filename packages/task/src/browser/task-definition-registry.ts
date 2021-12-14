@@ -15,6 +15,7 @@
  ********************************************************************************/
 
 import { injectable } from '@theia/core/shared/inversify';
+import { JSONExt } from '@theia/core/shared/@phosphor/coreutils';
 import { Event, Emitter } from '@theia/core/lib/common';
 import { TaskConfiguration, TaskDefinition, TaskCustomization } from '../common';
 import { Disposable } from '@theia/core/lib/common/disposable';
@@ -66,16 +67,16 @@ export class TaskDefinitionRegistry {
      * @return the task definition for the task configuration. If the task definition is not found, `undefined` is returned.
      */
     getDefinition(taskConfiguration: TaskConfiguration | TaskCustomization): TaskDefinition | undefined {
-        const definitions = this.getDefinitions(taskConfiguration.taskType || taskConfiguration.type);
+        const definitions = this.getDefinitions(taskConfiguration.type);
         let matchedDefinition: TaskDefinition | undefined;
         let highest = -1;
         for (const def of definitions) {
-            let score = 0;
-            if (!def.properties.required.every(requiredProp => taskConfiguration[requiredProp] !== undefined)) {
+            const required = def.properties.required || [];
+            if (!required.every(requiredProp => taskConfiguration[requiredProp] !== undefined)) {
                 continue;
             }
-            score += def.properties.required.length; // number of required properties
-            const requiredProps = new Set(def.properties.required);
+            let score = required.length; // number of required properties
+            const requiredProps = new Set(required);
             // number of optional properties
             score += def.properties.all.filter(p => !requiredProps.has(p) && taskConfiguration[p] !== undefined).length;
             if (score > highest) {
@@ -107,8 +108,8 @@ export class TaskDefinitionRegistry {
     }
 
     compareTasks(one: TaskConfiguration | TaskCustomization, other: TaskConfiguration | TaskCustomization): boolean {
-        const oneType = one.taskType || one.type;
-        const otherType = other.taskType || other.type;
+        const oneType = one.type;
+        const otherType = other.type;
         if (oneType !== otherType) {
             return false;
         }
@@ -119,7 +120,7 @@ export class TaskDefinitionRegistry {
             // "scope" reflects the original TaskConfigurationScope as provided by plugins,
             // Matching "_scope" or "scope" are both accepted in order to correlate provided task
             // configurations (e.g. TaskScope.Workspace) against already configured tasks.
-            return def.properties.all.every(p => p === 'type' || one[p] === other[p])
+            return def.properties.all.every(p => p === 'type' || JSONExt.deepEqual(one[p], other[p]))
                 && (one._scope === other._scope || one.scope === other.scope);
         }
         return one.label === other.label && one._source === other._source;

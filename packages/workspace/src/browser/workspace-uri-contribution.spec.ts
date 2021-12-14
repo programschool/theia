@@ -20,7 +20,6 @@ const disableJSDOM = enableJSDOM();
 import { expect } from 'chai';
 import * as sinon from 'sinon';
 import { Container } from '@theia/core/shared/inversify';
-import { Signal } from '@theia/core/shared/@phosphor/signaling';
 import { Event } from '@theia/core/lib/common/event';
 import { ApplicationShell, WidgetManager } from '@theia/core/lib/browser';
 import { DefaultUriLabelProviderContribution } from '@theia/core/lib/browser/label-provider';
@@ -45,8 +44,8 @@ beforeEach(() => {
 
     container = new Container();
     container.bind(ApplicationShell).toConstantValue({
-        currentChanged: new Signal({}),
-        widgets: () => []
+        onDidChangeCurrentWidget: () => undefined,
+        widgets: []
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
     container.bind(WidgetManager).toConstantValue({
@@ -100,13 +99,13 @@ describe('WorkspaceUriLabelProviderContribution class', () => {
             expect(labelProvider.getIcon(FileStat.file('file:///home/test'))).eq(labelProvider.defaultFileIcon);
         });
 
-        it('should return folder icon from a folder URI', async () => {
+        it('should return folder icon from a folder FileStat', async () => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             stubs.push(sinon.stub(DefaultUriLabelProviderContribution.prototype, <any>'getFileIcon').returns(undefined));
             expect(labelProvider.getIcon(FileStat.dir('file:///home/test'))).eq(labelProvider.defaultFolderIcon);
         });
 
-        it('should return file icon from a file URI', async () => {
+        it('should return file icon from a file FileStat', async () => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             stubs.push(sinon.stub(DefaultUriLabelProviderContribution.prototype, <any>'getFileIcon').returns(undefined));
             expect(labelProvider.getIcon(FileStat.file('file:///home/test'))).eq(labelProvider.defaultFileIcon);
@@ -118,6 +117,11 @@ describe('WorkspaceUriLabelProviderContribution class', () => {
             stubs.push(sinon.stub(DefaultUriLabelProviderContribution.prototype, <any>'getFileIcon').returns(ret));
             expect(labelProvider.getIcon(new URI('file:///home/test'))).eq(ret);
             expect(labelProvider.getIcon(FileStat.file('file:///home/test'))).eq(ret);
+        });
+
+        it('should return the default folder icon for a URI or file stat that corresponds to a workspace root', () => {
+            expect(labelProvider.getIcon(new URI('file:///workspace'))).eq(labelProvider.defaultFolderIcon);
+            expect(labelProvider.getIcon(FileStat.dir('file:///workspace'))).eq(labelProvider.defaultFolderIcon);
         });
     });
 

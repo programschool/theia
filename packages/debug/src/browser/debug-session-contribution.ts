@@ -23,13 +23,13 @@ import { WebSocketConnectionProvider } from '@theia/core/lib/browser/messaging/w
 import { DebugSession } from './debug-session';
 import { BreakpointManager } from './breakpoint/breakpoint-manager';
 import { DebugSessionOptions } from './debug-session-options';
-import { OutputChannelManager, OutputChannel } from '@theia/output/lib/common/output-channel';
+import { OutputChannelManager, OutputChannel } from '@theia/output/lib/browser/output-channel';
 import { DebugPreferences } from './debug-preferences';
 import { DebugSessionConnection } from './debug-session-connection';
-import { IWebSocket } from '@theia/core/shared/vscode-ws-jsonrpc';
-import { DebugAdapterPath } from '../common/debug-service';
+import { Channel, DebugAdapterPath } from '../common/debug-service';
 import { ContributionProvider } from '@theia/core/lib/common/contribution-provider';
 import { FileService } from '@theia/filesystem/lib/browser/file-service';
+import { DebugContribution } from './debug-contribution';
 
 /**
  * DebugSessionContribution symbol for DI.
@@ -50,7 +50,6 @@ export interface DebugSessionContribution {
      */
     debugSessionFactory(): DebugSessionFactory;
 }
-
 /**
  * DebugSessionContributionRegistry symbol for DI.
  */
@@ -90,12 +89,11 @@ export const DebugSessionFactory = Symbol('DebugSessionFactory');
  * The [debug session](#DebugSession) factory.
  */
 export interface DebugSessionFactory {
-    get(sessionId: string, options: DebugSessionOptions): DebugSession;
+    get(sessionId: string, options: DebugSessionOptions, parentSession?: DebugSession): DebugSession;
 }
 
 @injectable()
 export class DefaultDebugSessionFactory implements DebugSessionFactory {
-
     @inject(WebSocketConnectionProvider)
     protected readonly connectionProvider: WebSocketConnectionProvider;
     @inject(TerminalService)
@@ -114,11 +112,13 @@ export class DefaultDebugSessionFactory implements DebugSessionFactory {
     protected readonly debugPreferences: DebugPreferences;
     @inject(FileService)
     protected readonly fileService: FileService;
+    @inject(ContributionProvider) @named(DebugContribution)
+    protected readonly debugContributionProvider: ContributionProvider<DebugContribution>;
 
-    get(sessionId: string, options: DebugSessionOptions): DebugSession {
+    get(sessionId: string, options: DebugSessionOptions, parentSession?: DebugSession): DebugSession {
         const connection = new DebugSessionConnection(
             sessionId,
-            () => new Promise<IWebSocket>(resolve =>
+            () => new Promise<Channel>(resolve =>
                 this.connectionProvider.openChannel(`${DebugAdapterPath}/${sessionId}`, channel => {
                     resolve(channel);
                 }, { reconnecting: false })
@@ -127,13 +127,15 @@ export class DefaultDebugSessionFactory implements DebugSessionFactory {
         return new DebugSession(
             sessionId,
             options,
+            parentSession,
             connection,
             this.terminalService,
             this.editorManager,
             this.breakpoints,
             this.labelProvider,
             this.messages,
-            this.fileService);
+            this.fileService,
+            this.debugContributionProvider);
     }
 
     protected getTraceOutputChannel(): OutputChannel | undefined {
